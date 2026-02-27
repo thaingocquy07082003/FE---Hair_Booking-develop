@@ -9,9 +9,28 @@ export interface RegisterUserData {
   address?: string;
 }
 
+export interface VerifyOtpData {
+  email: string;
+  otp: string;
+}
+
+export interface ResendOtpData {
+  email: string;
+}
+
 export async function registerUser(data: RegisterUserData) {
   console.log("======================================================");
   const response = await api.post("/auth/register", data);
+  return response.data;
+}
+
+export async function verifyOtp(data: VerifyOtpData) {
+  const response = await api.post("/auth/verify-otp", data);
+  return response.data;
+}
+
+export async function resendOtp(data: ResendOtpData) {
+  const response = await api.post("/auth/resend-otp", data);
   return response.data;
 }
 

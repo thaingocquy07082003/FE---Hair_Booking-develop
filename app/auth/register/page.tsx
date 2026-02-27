@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
-import { registerUser } from "@/lib/api/auth";
+import { registerUser, verifyOtp, resendOtp } from "@/lib/api/auth";
 
 const formSchema = z.object({
   username: z.string().min(2, "Tên người dùng phải có ít nhất 2 ký tự"),
@@ -30,6 +30,9 @@ const formSchema = z.object({
 export default function RegisterPage() {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
+  const [showOtpForm, setShowOtpForm] = useState(false);
+  const [otp, setOtp] = useState("");
+  const [registeredEmail, setRegisteredEmail] = useState("");
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -46,13 +49,99 @@ export default function RegisterPage() {
     try {
       setIsLoading(true);
       await registerUser(values);
-      toast.success("Đăng ký thành công!");
-      router.push("/auth/login");
+      setRegisteredEmail(values.email);
+      setShowOtpForm(true);
+      toast.success("Mã OTP đã được gửi đến email của bạn!");
     } catch (error) {
       toast.error("Đăng ký thất bại. Vui lòng kiểm tra lại thông tin.");
     } finally {
       setIsLoading(false);
     }
+  }
+
+  async function onVerifyOtp() {
+    if (!otp || otp.length !== 6) {
+      toast.error("Vui lòng nhập mã OTP 6 số");
+      return;
+    }
+    try {
+      setIsLoading(true);
+      await verifyOtp({ email: registeredEmail, otp });
+      toast.success("Xác thực thành công! Vui lòng đăng nhập.");
+      router.push("/auth/login");
+    } catch (error) {
+      toast.error("Mã OTP không đúng. Vui lòng thử lại.");
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function onResendOtp() {
+    try {
+      setIsLoading(true);
+      await resendOtp({ email: registeredEmail });
+      toast.success("Mã OTP mới đã được gửi!");
+    } catch (error) {
+      toast.error("Gửi lại OTP thất bại. Vui lòng thử lại.");
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  // OTP verification form
+  if (showOtpForm) {
+    return (
+      <div className="container flex h-screen w-screen flex-col items-center justify-center">
+        <div className="mx-auto flex w-full flex-col justify-center space-y-6 sm:w-[350px]">
+          <div className="flex flex-col space-y-2 text-center">
+            <h1 className="text-2xl font-semibold tracking-tight">
+              Xác thực OTP
+            </h1>
+            <p className="text-sm text-muted-foreground">
+              Nhập mã OTP 6 số đã được gửi đến email <strong>{registeredEmail}</strong>
+            </p>
+          </div>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Mã OTP</label>
+              <Input
+                placeholder="Nhập mã OTP 6 số"
+                value={otp}
+                onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                maxLength={6}
+                className="text-center text-lg tracking-widest"
+              />
+            </div>
+            <Button
+              type="button"
+              className="w-full"
+              onClick={onVerifyOtp}
+              disabled={isLoading || otp.length !== 6}
+            >
+              {isLoading ? "Đang xác thực..." : "Xác thực"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full"
+              onClick={onResendOtp}
+              disabled={isLoading}
+            >
+              Gửi lại mã OTP
+            </Button>
+          </div>
+          <p className="px-8 text-center text-sm text-muted-foreground">
+            <button
+              type="button"
+              onClick={() => setShowOtpForm(false)}
+              className="underline underline-offset-4 hover:text-primary"
+            >
+              Quay lại đăng ký
+            </button>
+          </p>
+        </div>
+      </div>
+    );
   }
 
   return (
