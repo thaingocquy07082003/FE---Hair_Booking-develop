@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Mail, Lock, UserPlus } from "lucide-react";
+import { Mail, Lock } from "lucide-react";
 import { useAppDispatch } from "@/lib/hooks";
 import {
   loginStart,
@@ -11,6 +11,7 @@ import {
   loginFailure,
 } from "@/lib/store/slices/authSlice";
 import { login } from "@/services/auth.api";
+import { setCookie } from "@/lib/cookie";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,20 +37,27 @@ export default function LoginPage() {
 
     try {
       const response = await login({ email, password });
+
       if (response.statusCode === 200) {
+        const { accessToken, refreshToken, user } = response.data;
+
+        // ── Lưu token vào cookie ──────────────────────────────────────────
+        setCookie("accessToken", accessToken, 1);   // 1 ngày (khớp exp token)
+        setCookie("refreshToken", refreshToken, 7); // 7 ngày
+
+        // ── Lưu thông tin cơ bản người dùng vào cookie ───────────────────
+        setCookie("userId", user.id, 7);
+        setCookie("userEmail", user.email, 7);
+        setCookie("userFullName", user.fullName, 7);
+        setCookie("userRole", user.role, 7);
+
+        // ── Giữ localStorage để tương thích code cũ ───────────────────────
         localStorage.setItem(
           "user",
-          JSON.stringify({
-            user: response.data,
-            access_token: response?.data?.accessToken,
-          })
+          JSON.stringify({ user: response.data, access_token: accessToken })
         );
-        dispatch(
-          loginSuccess({
-            user: response.data,
-            token: response.data.accessToken,
-          })
-        );
+
+        dispatch(loginSuccess({ user: response.data, token: accessToken }));
         router.push("/");
       }
     } catch (error: any) {
@@ -106,10 +114,7 @@ export default function LoginPage() {
           </form>
           <div className="mt-4 text-center text-sm">
             <span className="text-gray-500">Chưa có tài khoản? </span>
-            <Link
-              href="/auth/register"
-              className="text-primary hover:underline"
-            >
+            <Link href="/auth/register" className="text-primary hover:underline">
               Đăng ký ngay
             </Link>
           </div>

@@ -1,197 +1,300 @@
 "use client";
 
-import { useState } from "react";
-import { Search, Star, MapPin, Phone, Mail } from "lucide-react";
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import {
+  User,
+  Star,
+  CalendarRange,
+  Scissors,
+  CheckCircle2,
+  XCircle,
+  Search,
+  Clock,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { useRouter } from "next/navigation";
+import { getAllStylists, Stylist } from "@/services/stylist/stylist.api";
 
-// Dữ liệu mẫu cho thợ cắt tóc
-const stylists = [
-  {
-    id: "1",
-    name: "Nguyễn Văn A",
-    role: "Senior Stylist",
-    rating: 4.8,
-    reviews: 128,
-    experience: "5 năm",
-    specialties: ["Cắt tóc nam", "Tạo kiểu", "Nhuộm tóc"],
-    image: "/images/stylist-1.jpg",
-    location: "Quận 1, TP.HCM",
-    phone: "0123 456 789",
-    email: "nguyenvana@example.com",
-  },
-  {
-    id: "2",
-    name: "Trần Thị B",
-    role: "Stylist",
-    rating: 4.6,
-    reviews: 95,
-    experience: "3 năm",
-    specialties: ["Cắt tóc nữ", "Uốn tóc", "Phục hồi tóc"],
-    image: "/images/stylist-2.jpg",
-    location: "Quận 3, TP.HCM",
-    phone: "0987 654 321",
-    email: "tranthib@example.com",
-  },
-  {
-    id: "3",
-    name: "Lê Văn C",
-    role: "Junior Stylist",
-    rating: 4.5,
-    reviews: 76,
-    experience: "2 năm",
-    specialties: ["Cắt tóc nam", "Tạo kiểu"],
-    image:
-      "https://media.istockphoto.com/id/640274128/vi/anh/th%E1%BB%A3-c%E1%BA%AFt-t%C3%B3c-s%E1%BB%AD-d%E1%BB%A5ng-k%C3%A9o-v%C3%A0-l%C6%B0%E1%BB%A3c.jpg?s=612x612&w=0&k=20&c=o82ARZnhqPdFAqU6WOWLnnP-Z7dGi22crXtevsOguAU=",
-    location: "Quận 5, TP.HCM",
-    phone: "0369 852 147",
-    email: "levanc@example.com",
-  },
-  {
-    id: "4",
-    name: "Nguyễn Văn D",
-    role: "Junior Stylist",
-    rating: 4.5,
-    reviews: 76,
-    experience: "2 năm",
-    specialties: ["Cắt tóc nam", "Tạo kiểu"],
-    image: "/images/stylist-3.jpg",
-    location: "Quận 5, TP.HCM",
-    phone: "0369 852 147",
-    email: "nguyenvand@example.com",
-  },
-];
-
-export default function StylistsPage() {
-  const [searchQuery, setSearchQuery] = useState("");
-  const [sortBy, setSortBy] = useState("rating");
-  const router = useRouter();
-
-  const filteredStylists = stylists.filter((stylist) =>
-    stylist.name.toLowerCase().includes(searchQuery.toLowerCase())
+// ── Avatar ────────────────────────────────────────────────────────────────────
+function StylistAvatar({
+  avatarUrl,
+  fullName,
+}: {
+  avatarUrl: string | null;
+  fullName: string;
+}) {
+  if (avatarUrl) {
+    return (
+      <img
+        src={avatarUrl}
+        alt={fullName}
+        className="h-20 w-20 rounded-full object-cover ring-4 ring-background"
+      />
+    );
+  }
+  return (
+    <div className="h-20 w-20 rounded-full bg-muted flex items-center justify-center ring-4 ring-background">
+      <User className="h-9 w-9 text-muted-foreground" />
+    </div>
   );
+}
 
-  const sortedStylists = [...filteredStylists].sort((a, b) => {
-    if (sortBy === "rating") {
-      return b.rating - a.rating;
+// ── Star rating ───────────────────────────────────────────────────────────────
+function StarRating({ rating }: { rating: number }) {
+  return (
+    <div className="flex items-center gap-1">
+      {[1, 2, 3, 4, 5].map((star) => (
+        <svg
+          key={star}
+          className="h-3.5 w-3.5"
+          viewBox="0 0 20 20"
+          fill={star <= Math.round(rating) ? "#f59e0b" : "none"}
+          stroke={star <= Math.round(rating) ? "#f59e0b" : "#d1d5db"}
+          strokeWidth="1.5"
+        >
+          <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+        </svg>
+      ))}
+      <span className="text-xs text-muted-foreground ml-1">
+        {rating > 0 ? rating.toFixed(1) : "Chưa có"}
+      </span>
+    </div>
+  );
+}
+
+// ── Skeleton card ─────────────────────────────────────────────────────────────
+function SkeletonCard() {
+  return (
+    <div className="rounded-2xl border bg-card p-6 animate-pulse space-y-4">
+      <div className="flex flex-col items-center gap-3">
+        <div className="h-20 w-20 rounded-full bg-muted" />
+        <div className="h-4 w-32 rounded bg-muted" />
+        <div className="h-3 w-20 rounded bg-muted" />
+      </div>
+      <div className="space-y-2">
+        <div className="h-3 w-full rounded bg-muted" />
+        <div className="h-3 w-3/4 rounded bg-muted" />
+      </div>
+      <div className="h-9 rounded-lg bg-muted" />
+    </div>
+  );
+}
+
+// ── Main page ─────────────────────────────────────────────────────────────────
+export default function StylistsPage() {
+  const [stylists, setStylists] = useState<Stylist[]>([]);
+  const [filtered, setFiltered] = useState<Stylist[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [filterAvailable, setFilterAvailable] = useState<
+    "all" | "available" | "unavailable"
+  >("all");
+
+  useEffect(() => {
+    getAllStylists()
+      .then((data) => {
+        setStylists(data);
+        setFiltered(data);
+      })
+      .catch(() => setError("Không thể tải danh sách thợ cắt tóc"))
+      .finally(() => setIsLoading(false));
+  }, []);
+
+  // ── Filter logic ──────────────────────────────────────────────────────────
+  useEffect(() => {
+    let result = [...stylists];
+
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      result = result.filter(
+        (s) =>
+          s.fullName.toLowerCase().includes(q) ||
+          s.specialties.some((sp) => sp.toLowerCase().includes(q))
+      );
     }
-    if (sortBy === "reviews") {
-      return b.reviews - a.reviews;
+
+    if (filterAvailable === "available") {
+      result = result.filter((s) => s.isAvailable);
+    } else if (filterAvailable === "unavailable") {
+      result = result.filter((s) => !s.isAvailable);
     }
-    return 0;
-  });
+
+    setFiltered(result);
+  }, [search, filterAvailable, stylists]);
 
   return (
-    <div className="container py-8 px-4 md:px-6">
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-8">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tighter">Thợ cắt tóc</h1>
-          <p className="text-gray-500">
-            Tìm kiếm và đặt lịch với thợ cắt tóc phù hợp
-          </p>
+    <div className="container py-12 px-4 md:px-6">
+      {/* ── Header ── */}
+      <div className="text-center space-y-3 mb-10">
+        <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
+          Đội ngũ thợ cắt tóc
+        </h1>
+        <p className="text-muted-foreground max-w-xl mx-auto">
+          Gặp gỡ những nghệ nhân tài năng của chúng tôi — mỗi người đều mang
+          phong cách riêng và nhiều năm kinh nghiệm.
+        </p>
+      </div>
+
+      {/* ── Filters ── */}
+      <div className="flex flex-col sm:flex-row gap-3 mb-8 max-w-2xl mx-auto">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Tìm theo tên hoặc chuyên môn..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-9"
+          />
         </div>
-        <div className="flex flex-col md:flex-row gap-4">
-          <div className="relative">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-500" />
-            <Input
-              type="search"
-              placeholder="Tìm kiếm thợ cắt tóc..."
-              className="pl-8"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-          </div>
-          <Select value={sortBy} onValueChange={setSortBy}>
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="Sắp xếp theo" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="rating">Đánh giá cao nhất</SelectItem>
-              <SelectItem value="reviews">Nhiều đánh giá nhất</SelectItem>
-            </SelectContent>
-          </Select>
+        <div className="flex gap-2">
+          {(
+            [
+              { key: "all", label: "Tất cả" },
+              { key: "available", label: "Đang rảnh" },
+              { key: "unavailable", label: "Bận" },
+            ] as const
+          ).map(({ key, label }) => (
+            <button
+              key={key}
+              onClick={() => setFilterAvailable(key)}
+              className={`px-4 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                filterAvailable === key
+                  ? "bg-primary text-primary-foreground border-primary"
+                  : "bg-background border-border text-muted-foreground hover:bg-muted"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
       </div>
 
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-        {sortedStylists.map((stylist) => (
-          <Card
-            key={stylist.id}
-            className="overflow-hidden group hover:shadow-lg transition-shadow duration-300"
+      {/* ── Error ── */}
+      {error && (
+        <div className="text-center py-16 text-muted-foreground">{error}</div>
+      )}
+
+      {/* ── Grid ── */}
+      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {isLoading
+          ? Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)
+          : filtered.map((stylist) => (
+              <StylistCard key={stylist.id} stylist={stylist} />
+            ))}
+      </div>
+
+      {/* ── Empty state ── */}
+      {!isLoading && !error && filtered.length === 0 && (
+        <div className="text-center py-20 space-y-3">
+          <Scissors className="h-12 w-12 text-muted-foreground mx-auto" />
+          <p className="text-muted-foreground">
+            Không tìm thấy thợ cắt tóc phù hợp
+          </p>
+          <button
+            onClick={() => {
+              setSearch("");
+              setFilterAvailable("all");
+            }}
+            className="text-sm text-primary underline underline-offset-2"
           >
-            <div
-              className="relative h-64 cursor-pointer"
-              onClick={() => router.push(`/stylists/${stylist.id}`)}
+            Xóa bộ lọc
+          </button>
+        </div>
+      )}
+
+      {/* ── Count ── */}
+      {!isLoading && !error && filtered.length > 0 && (
+        <p className="text-center text-sm text-muted-foreground mt-8">
+          Hiển thị {filtered.length} / {stylists.length} thợ cắt tóc
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ── Stylist card ──────────────────────────────────────────────────────────────
+function StylistCard({ stylist }: { stylist: Stylist }) {
+  return (
+    <div className="rounded-2xl border bg-card shadow-sm hover:shadow-md transition-shadow flex flex-col overflow-hidden group">
+      {/* Top colored band */}
+      <div className="h-16 bg-gradient-to-r from-muted to-muted/60 relative">
+        {/* Available badge */}
+        <div className="absolute top-3 right-3">
+          {stylist.isAvailable ? (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+              <CheckCircle2 className="h-3 w-3" />
+              Đang rảnh
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-50 text-red-600 border border-red-200">
+              <XCircle className="h-3 w-3" />
+              Đang bận
+            </span>
+          )}
+        </div>
+        {/* Avatar overlapping */}
+        <div className="absolute -bottom-10 left-6">
+          <StylistAvatar avatarUrl={stylist.avatarUrl} fullName={stylist.fullName} />
+        </div>
+      </div>
+
+      {/* Content */}
+      <div className="pt-12 pb-5 px-6 flex flex-col flex-1 gap-4">
+        {/* Name + rating */}
+        <div>
+          <h3 className="font-semibold text-base leading-tight">
+            {stylist.fullName}
+          </h3>
+          <div className="mt-1">
+            <StarRating rating={stylist.rating} />
+          </div>
+        </div>
+
+        {/* Stats */}
+        <div className="flex gap-4 text-sm">
+          <div className="flex items-center gap-1.5 text-muted-foreground">
+            <Clock className="h-3.5 w-3.5 shrink-0" />
+            <span>
+              {stylist.experience > 0
+                ? `${stylist.experience} năm KN`
+                : "Mới vào nghề"}
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5 text-muted-foreground">
+            <CalendarRange className="h-3.5 w-3.5 shrink-0" />
+            <span>{stylist.totalBookings} lịch</span>
+          </div>
+        </div>
+
+        {/* Specialties */}
+        {stylist.specialties.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {stylist.specialties.map((sp) => (
+              <span
+                key={sp}
+                className="px-2.5 py-0.5 rounded-full text-xs bg-muted text-muted-foreground border border-border"
+              >
+                {sp}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {/* CTA */}
+        <div className="mt-auto pt-1">
+          <Button className="w-full" size="sm" asChild disabled={!stylist.isAvailable}>
+            <Link
+              href={`/booking?stylistId=${stylist.id}`}
+              aria-disabled={!stylist.isAvailable}
+              onClick={(e) => !stylist.isAvailable && e.preventDefault()}
             >
-              <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent z-10" />
-              <img
-                src={stylist.image}
-                alt={stylist.name}
-                className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
-              />
-              <div className="absolute bottom-4 left-4 z-20">
-                <h3 className="text-xl font-bold text-white">{stylist.name}</h3>
-                <p className="text-sm text-white/80">{stylist.role}</p>
-              </div>
-              <div className="absolute top-4 right-4 z-20">
-                <div className="bg-white/90 backdrop-blur-sm rounded-full px-3 py-1 flex items-center gap-1 shadow-sm">
-                  <Star className="h-4 w-4 text-yellow-500 fill-yellow-500" />
-                  <span className="font-medium">{stylist.rating}</span>
-                  <span className="text-gray-500">({stylist.reviews})</span>
-                </div>
-              </div>
-            </div>
-            <CardContent className="p-6">
-              <div className="space-y-4">
-                <div className="flex items-center gap-2 text-sm text-gray-500">
-                  <MapPin className="h-4 w-4" />
-                  <span>{stylist.location}</span>
-                </div>
-                <div className="flex items-center gap-2 text-sm text-gray-500">
-                  <Phone className="h-4 w-4" />
-                  <span>{stylist.phone}</span>
-                </div>
-                <div className="flex items-center gap-2 text-sm text-gray-500">
-                  <Mail className="h-4 w-4" />
-                  <span>{stylist.email}</span>
-                </div>
-                <div>
-                  <p className="text-sm font-medium mb-2">
-                    Kinh nghiệm: {stylist.experience}
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {stylist.specialties.map((specialty, index) => (
-                      <span
-                        key={index}
-                        className="bg-gray-100 text-gray-700 px-2 py-1 rounded-full text-xs hover:bg-gray-200 transition-colors duration-200"
-                      >
-                        {specialty}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-                <Button className="w-full bg-primary hover:bg-primary/90 transition-colors duration-200">
-                  Đặt lịch
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+              <CalendarRange className="mr-1.5 h-3.5 w-3.5" />
+              {stylist.isAvailable ? "Đặt lịch ngay" : "Hiện không nhận lịch"}
+            </Link>
+          </Button>
+        </div>
       </div>
     </div>
   );
