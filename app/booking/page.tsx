@@ -1,757 +1,718 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import Link from "next/link";
-import { format, addDays, isBefore, startOfDay } from "date-fns";
-import { vi } from "date-fns/locale";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import api from "@/lib/axios";
+import { cn } from "@/lib/utils";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   Check,
-  ChevronLeft,
   ChevronRight,
+  ChevronLeft,
   Clock,
-  LogIn,
   Scissors,
-  UserPlus,
   User,
-  Star,
-  Banknote,
-  CreditCard,
   CalendarDays,
   Phone,
-  Mail,
   StickyNote,
+  Star,
+  Loader2,
   CheckCircle2,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
-import { cn } from "@/lib/utils";
-import { useSelector } from "react-redux";
-import { RootState } from "@/lib/store";
-import { getCookie } from "@/lib/cookie";
+import { toast } from "sonner";
+import { createAppointment } from "@/services/appointment/appointment";
+import { getAllStylists } from "@/services/stylist/stylist.api";
 
-// ── Mock data (thay bằng API call sau) ────────────────────────────────────────
-const MOCK_STYLISTS = [
-  {
-    id: "54c2bf65-bc83-4b55-bbcc-da9ab2b1d368",
-    name: "Thợ cắt tóc 01",
-    rating: 4.5,
-    experience: 3,
-    specialties: ["Cắt tóc nam", "Uốn tóc"],
-    avatarUrl: null,
-  },
-  {
-    id: "e8c3abd5-7e7c-49f0-b249-93d09238af98",
-    name: "Thợ cắt tóc 02",
-    rating: 4.2,
-    experience: 2,
-    specialties: ["Cắt tóc nữ", "Nhuộm tóc"],
-    avatarUrl: null,
-  },
-  {
-    id: "587424f6-a936-47ea-a2ed-918b1c4d0883",
-    name: "Thợ cắt tóc 03",
-    rating: 0,
-    experience: 0,
-    specialties: ["Cắt tóc trẻ em"],
-    avatarUrl: null,
-  },
+interface HairStyle {
+  id: string;
+  name: string;
+  description: string;
+  price: number;
+  duration: number;
+  imageUrl: string;
+  category: string;
+  difficulty: "easy" | "medium" | "hard";
+  stylistIds: string[];
+}
+
+interface Stylist {
+  id: string;
+  fullName: string;
+  avatarUrl: string | null;
+  experience: number;
+  rating: number;
+  totalBookings: number;
+  specialties: string[];
+  isAvailable: boolean;
+}
+
+interface Slot {
+  startTime: string;
+  endTime: string;
+  isAvailable: boolean;
+  duration: number;
+}
+
+interface StylistSlots {
+  stylistId: string;
+  stylistName: string;
+  date: string;
+  slots: Slot[];
+}
+
+const CATEGORY_LABELS: Record<string, string> = {
+  all: "Tất cả",
+  men_short: "Nam ngắn",
+  women_short: "Nữ ngắn",
+  women_long: "Nữ dài",
+  kids: "Trẻ em",
+  beard: "Râu",
+  coloring: "Nhuộm",
+  perm: "Uốn / Duỗi",
+};
+
+const DIFFICULTY_CONFIG = {
+  easy:   { label: "Đơn giản",   color: "text-emerald-600 bg-emerald-50 border-emerald-200" },
+  medium: { label: "Trung bình", color: "text-amber-600 bg-amber-50 border-amber-200" },
+  hard:   { label: "Phức tạp",   color: "text-rose-600 bg-rose-50 border-rose-200" },
+};
+
+function formatPrice(p: number) {
+  return p.toLocaleString("vi-VN") + "đ";
+}
+function formatDuration(m: number) {
+  if (m < 60) return `${m} phút`;
+  const h = Math.floor(m / 60);
+  const min = m % 60;
+  return min > 0 ? `${h}g ${min}p` : `${h} giờ`;
+}
+
+const STEPS = [
+  { id: 1, label: "Kiểu tóc" },
+  { id: 2, label: "Thợ cắt" },
+  { id: 3, label: "Lịch hẹn" },
+  { id: 4, label: "Xác nhận" },
 ];
 
-const MOCK_HAIRSTYLES = [
-  {
-    id: "5d2be747-b893-432d-a25b-48c7584b2148",
-    name: "Cắt ngắn undercut",
-    duration: 45,
-    price: 150000,
-  },
-  {
-    id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-    name: "Uốn xoăn tự nhiên",
-    duration: 90,
-    price: 350000,
-  },
-  {
-    id: "b2c3d4e5-f6a7-8901-bcde-f12345678901",
-    name: "Nhuộm highlight",
-    duration: 120,
-    price: 500000,
-  },
-  {
-    id: "c3d4e5f6-a7b8-9012-cdef-123456789012",
-    name: "Duỗi phục hồi",
-    duration: 150,
-    price: 600000,
-  },
-];
+const DAY_LABELS = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
 
-const TIME_SLOTS = [
-  "08:00","08:30","09:00","09:30","10:00","10:30",
-  "11:00","11:30","13:00","13:30","14:00","14:30",
-  "15:00","15:30","16:00","16:30","17:00","17:30","18:00",
-];
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-const formatVND = (n: number) =>
-  new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(n);
-
-function StylistAvatar({ avatarUrl, name }: { avatarUrl: string | null; name: string }) {
-  if (avatarUrl)
-    return <img src={avatarUrl} alt={name} className="h-12 w-12 rounded-full object-cover" />;
-  return (
-    <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center shrink-0">
-      <User className="h-5 w-5 text-muted-foreground" />
-    </div>
-  );
+function getNext7Days() {
+  return Array.from({ length: 7 }, (_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() + i);
+    return d;
+  });
 }
 
-function StarRow({ rating }: { rating: number }) {
-  if (rating === 0) return <span className="text-xs text-muted-foreground">Chưa có đánh giá</span>;
-  return (
-    <div className="flex items-center gap-0.5">
-      {[1,2,3,4,5].map((s) => (
-        <Star
-          key={s}
-          className="h-3 w-3"
-          fill={s <= Math.round(rating) ? "#f59e0b" : "none"}
-          stroke={s <= Math.round(rating) ? "#f59e0b" : "#d1d5db"}
-        />
-      ))}
-      <span className="text-xs text-muted-foreground ml-1">{rating.toFixed(1)}</span>
-    </div>
-  );
-}
-
-// ── Inline mini-calendar ──────────────────────────────────────────────────────
-function MiniCalendar({
-  selected,
-  onSelect,
-}: {
-  selected: Date | null;
-  onSelect: (d: Date) => void;
-}) {
-  const today = startOfDay(new Date());
-  const [viewMonth, setViewMonth] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
-
-  const year = viewMonth.getFullYear();
-  const month = viewMonth.getMonth();
-  const firstDay = new Date(year, month, 1).getDay(); // 0=Sun
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-
-  const prevMonth = () => setViewMonth(new Date(year, month - 1, 1));
-  const nextMonth = () => setViewMonth(new Date(year, month + 1, 1));
-
-  const cells: (Date | null)[] = [
-    ...Array(firstDay).fill(null),
-    ...Array.from({ length: daysInMonth }, (_, i) => new Date(year, month, i + 1)),
-  ];
-
-  const DAYS = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
-
-  return (
-    <div className="rounded-xl border bg-card p-4 select-none">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-3">
-        <button
-          type="button"
-          onClick={prevMonth}
-          className="p-1.5 rounded-lg hover:bg-muted transition-colors"
-        >
-          <ChevronLeft className="h-4 w-4" />
-        </button>
-        <span className="text-sm font-semibold">
-          {format(viewMonth, "MMMM yyyy", { locale: vi })}
-        </span>
-        <button
-          type="button"
-          onClick={nextMonth}
-          className="p-1.5 rounded-lg hover:bg-muted transition-colors"
-        >
-          <ChevronRight className="h-4 w-4" />
-        </button>
-      </div>
-
-      {/* Day labels */}
-      <div className="grid grid-cols-7 mb-1">
-        {DAYS.map((d) => (
-          <div key={d} className="text-center text-xs text-muted-foreground py-1 font-medium">
-            {d}
-          </div>
-        ))}
-      </div>
-
-      {/* Cells */}
-      <div className="grid grid-cols-7 gap-y-0.5">
-        {cells.map((date, i) => {
-          if (!date) return <div key={`empty-${i}`} />;
-          const isPast = isBefore(date, today);
-          const isSelected =
-            selected && format(date, "yyyy-MM-dd") === format(selected, "yyyy-MM-dd");
-          const isToday = format(date, "yyyy-MM-dd") === format(today, "yyyy-MM-dd");
-
-          return (
-            <button
-              key={date.toISOString()}
-              type="button"
-              disabled={isPast}
-              onClick={() => onSelect(date)}
-              className={cn(
-                "h-8 w-full rounded-lg text-sm transition-colors",
-                isPast && "text-muted-foreground/40 cursor-not-allowed",
-                !isPast && !isSelected && "hover:bg-muted",
-                isToday && !isSelected && "font-semibold text-primary",
-                isSelected && "bg-primary text-primary-foreground font-semibold"
-              )}
-            >
-              {date.getDate()}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-// ── Step indicator ────────────────────────────────────────────────────────────
-const STEPS = ["Kiểu tóc", "Thợ & Ngày giờ", "Thông tin", "Xác nhận"];
-
-function StepBar({ current }: { current: number }) {
-  return (
-    <div className="flex items-center gap-0 w-full max-w-lg mx-auto mb-8">
-      {STEPS.map((label, i) => {
-        const done = i < current;
-        const active = i === current;
-        return (
-          <div key={i} className="flex items-center flex-1 last:flex-none">
-            <div className="flex flex-col items-center gap-1 shrink-0">
-              <div
-                className={cn(
-                  "h-8 w-8 rounded-full flex items-center justify-center text-xs font-semibold border-2 transition-all",
-                  done && "bg-primary border-primary text-primary-foreground",
-                  active && "border-primary text-primary bg-background",
-                  !done && !active && "border-muted text-muted-foreground bg-background"
-                )}
-              >
-                {done ? <Check className="h-4 w-4" /> : i + 1}
-              </div>
-              <span
-                className={cn(
-                  "text-[11px] font-medium whitespace-nowrap",
-                  active ? "text-primary" : "text-muted-foreground"
-                )}
-              >
-                {label}
-              </span>
-            </div>
-            {i < STEPS.length - 1 && (
-              <div
-                className={cn(
-                  "flex-1 h-0.5 mx-1 mb-4 transition-all",
-                  done ? "bg-primary" : "bg-muted"
-                )}
-              />
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-// ── Section wrapper ───────────────────────────────────────────────────────────
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="space-y-3">
-      <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-        {title}
-      </h2>
-      {children}
-    </div>
-  );
-}
-
-// ── Main page ─────────────────────────────────────────────────────────────────
 export default function BookingPage() {
-  const { isAuthenticated } = useSelector((state: RootState) => state.auth);
-  const [step, setStep] = useState(0);
-  const [isComplete, setIsComplete] = useState(false);
+  const router = useRouter();
+  const [step, setStep] = useState(1);
 
-  // Form state
-  const [selectedHairstyle, setSelectedHairstyle] = useState<(typeof MOCK_HAIRSTYLES)[0] | null>(null);
-  const [selectedStylist, setSelectedStylist] = useState<(typeof MOCK_STYLISTS)[0] | null>(null);
-  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
-  const [selectedTime, setSelectedTime] = useState<string>("");
-  const [customerName, setCustomerName] = useState(getCookie("userFullName") ?? "");
-  const [customerPhone, setCustomerPhone] = useState(getCookie("userPhone") ?? "");
-  const [customerEmail, setCustomerEmail] = useState(getCookie("userEmail") ?? "");
-  const [notes, setNotes] = useState("");
-  const [depositPaid, setDepositPaid] = useState(false);
+  const [hairstyles, setHairstyles]         = useState<HairStyle[]>([]);
+  const [stylists, setStylists]             = useState<Stylist[]>([]);
+  const [availableTimes, setAvailableTimes] = useState<Slot[]>([]);
 
-  const depositAmount = selectedHairstyle ? Math.round(selectedHairstyle.price * 0.25) : 0;
+  const [loadingStyles,   setLoadingStyles]   = useState(true);
+  const [loadingStylists, setLoadingStylists] = useState(false);
+  const [loadingTimes,    setLoadingTimes]    = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [done, setDone]             = useState(false);
 
-  const canNextStep0 = !!selectedHairstyle;
-  const canNextStep1 = !!selectedStylist && !!selectedDate && !!selectedTime;
-  const canNextStep2 = customerName.trim().length >= 2 && customerPhone.trim().length >= 10;
+  const [selectedStyle,   setSelectedStyle]   = useState<HairStyle | null>(null);
+  const [selectedStylist, setSelectedStylist] = useState<Stylist | null>(null);
+  const [selectedDate,    setSelectedDate]    = useState<Date | null>(null);
+  const [selectedTime,    setSelectedTime]    = useState<string | null>(null);
+  const [phone,    setPhone]    = useState("");
+  const [username, setUsername] = useState("");
+  const [notes,    setNotes]    = useState("");
+  const [activeCategory, setActiveCategory] = useState("all");
 
-  // ── Not logged in ──
-  if (!isAuthenticated) {
+  // fetch hairstyles
+  useEffect(() => {
+    (async () => {
+      setLoadingStyles(true);
+      try {
+        const res  = await api.get("http://localhost:3002/api/v1/hairstyles");
+        const data = res.data?.data ?? res.data;
+        setHairstyles(Array.isArray(data) ? data : []);
+      } catch {
+        toast.error("Không thể tải danh sách kiểu tóc");
+      } finally {
+        setLoadingStyles(false);
+      }
+    })();
+  }, []);
+
+  // fetch stylists on step 2
+  useEffect(() => {
+    if (step !== 2) return;
+    (async () => {
+      setLoadingStylists(true);
+      try {
+        const data: Stylist[] = await getAllStylists();
+        const filtered =
+          selectedStyle && selectedStyle.stylistIds.length > 0
+            ? data.filter((s) => selectedStyle.stylistIds.includes(s.id))
+            : data;
+        setStylists(filtered);
+      } catch {
+        toast.error("Không thể tải danh sách thợ");
+      } finally {
+        setLoadingStylists(false);
+      }
+    })();
+  }, [step]);
+
+  // fetch available slots when date changes (step 3)
+  useEffect(() => {
+    if (!selectedDate) return;
+    (async () => {
+      setLoadingTimes(true);
+      setSelectedTime(null);
+      try {
+        const dateStr = selectedDate.toISOString().split("T")[0];
+        const res = await api.get(
+          `http://localhost:3003/api/v1/availability/slots?date=${dateStr}`
+        );
+        const allStylistSlots: StylistSlots[] = res.data?.data ?? [];
+
+        if (!selectedStylist?.id) {
+          // "Bất kỳ thợ nào" — gộp tất cả slots, deduplicate theo startTime
+          const merged = new Map<string, Slot>();
+          allStylistSlots.forEach((s) =>
+            s.slots.forEach((slot) => {
+              const existing = merged.get(slot.startTime);
+              // slot available nếu ít nhất 1 thợ còn trống
+              if (!existing || slot.isAvailable) {
+                merged.set(slot.startTime, slot);
+              }
+            })
+          );
+          setAvailableTimes(
+            Array.from(merged.values()).sort((a, b) =>
+              a.startTime.localeCompare(b.startTime)
+            )
+          );
+        } else {
+          // thợ cụ thể — lấy slots của thợ đó
+          const found = allStylistSlots.find(
+            (s) => s.stylistId === selectedStylist.id
+          );
+          setAvailableTimes(found?.slots ?? []);
+        }
+      } catch {
+        toast.error("Không thể tải khung giờ. Vui lòng thử lại.");
+        setAvailableTimes([]);
+      } finally {
+        setLoadingTimes(false);
+      }
+    })();
+  }, [selectedDate, selectedStylist]);
+
+  const handleSubmit = async () => {
+    if (!selectedStyle || !selectedDate || !selectedTime || !phone) {
+      toast.error("Vui lòng điền đầy đủ thông tin");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const [h, m] = selectedTime.split(":").map(Number);
+      const dt = new Date(selectedDate);
+      dt.setHours(h, m, 0, 0);
+      await createAppointment({
+        branchId:      "",
+        serviceId:     selectedStyle.id,
+        phone,
+        date:          dt,
+        notes,
+        username,
+        hairStylistId: selectedStylist?.id || undefined,
+      });
+      setDone(true);
+    } catch {
+      toast.error("Đặt lịch thất bại. Vui lòng thử lại.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const canNext = () => {
+    if (step === 1) return !!selectedStyle;
+    if (step === 2) return !!selectedStylist;
+    if (step === 3) return !!selectedDate && !!selectedTime;
+    return true;
+  };
+
+  const categories    = ["all", ...Array.from(new Set(hairstyles.map((h) => h.category)))];
+  const filteredStyles = activeCategory === "all" ? hairstyles : hairstyles.filter((h) => h.category === activeCategory);
+  const days          = getNext7Days();
+
+  // ── Done ──────────────────────────────────────────────────────────────────
+  if (done) {
     return (
-      <div className="container py-20 px-4">
-        <div className="max-w-md mx-auto text-center space-y-6">
-          <div className="h-16 w-16 rounded-2xl bg-muted flex items-center justify-center mx-auto">
-            <CalendarDays className="h-8 w-8 text-muted-foreground" />
+      <div className="min-h-screen bg-[#f9f7f4] flex items-center justify-center px-4">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}
+          className="bg-white rounded-3xl shadow-xl p-10 max-w-md w-full text-center"
+        >
+          <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-6">
+            <CheckCircle2 className="h-10 w-10 text-emerald-500" />
           </div>
-          <div>
-            <h1 className="text-2xl font-bold">Đặt lịch cắt tóc</h1>
-            <p className="text-muted-foreground mt-2">
-              Vui lòng đăng nhập để tiếp tục đặt lịch
-            </p>
-          </div>
-          <div className="flex gap-3 justify-center">
-            <Button asChild>
-              <Link href="/auth/login">
-                <LogIn className="h-4 w-4 mr-2" />
-                Đăng nhập
-              </Link>
-            </Button>
-            <Button variant="outline" asChild>
-              <Link href="/auth/register">
-                <UserPlus className="h-4 w-4 mr-2" />
-                Đăng ký
-              </Link>
-            </Button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ── Booking complete ──
-  if (isComplete) {
-    return (
-      <div className="container py-16 px-4">
-        <div className="max-w-md mx-auto text-center space-y-6">
-          <div className="h-20 w-20 rounded-full bg-emerald-100 flex items-center justify-center mx-auto">
-            <CheckCircle2 className="h-10 w-10 text-emerald-600" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold">Đặt lịch thành công!</h1>
-            <p className="text-muted-foreground mt-2">
-              Chúng tôi đã nhận yêu cầu và sẽ xác nhận qua email sớm nhất.
-            </p>
-          </div>
-          <div className="rounded-xl border bg-card p-5 text-left space-y-3 text-sm">
+          <h2 className="text-2xl font-bold text-zinc-900 mb-2" style={{ fontFamily: "'Georgia', serif" }}>
+            Đặt lịch thành công!
+          </h2>
+          <p className="text-zinc-500 text-sm mb-4">
+            Chúng tôi sẽ liên hệ xác nhận qua số{" "}
+            <span className="font-semibold text-zinc-800">{phone}</span>
+          </p>
+          <div className="bg-zinc-50 rounded-2xl p-4 mb-6 text-left space-y-2.5 text-sm">
             <div className="flex justify-between">
-              <span className="text-muted-foreground">Kiểu tóc</span>
-              <span className="font-medium">{selectedHairstyle?.name}</span>
+              <span className="text-zinc-500">Kiểu tóc</span>
+              <span className="font-medium text-zinc-800">{selectedStyle?.name}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-muted-foreground">Thợ cắt</span>
-              <span className="font-medium">{selectedStylist?.name}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Ngày</span>
-              <span className="font-medium">
-                {selectedDate && format(selectedDate, "dd/MM/yyyy")}
+              <span className="text-zinc-500">Thợ cắt</span>
+              <span className="font-medium text-zinc-800">
+                {selectedStylist?.id ? selectedStylist.fullName : "Bất kỳ"}
               </span>
             </div>
             <div className="flex justify-between">
-              <span className="text-muted-foreground">Giờ</span>
-              <span className="font-medium">{selectedTime}</span>
-            </div>
-            <div className="flex justify-between border-t pt-3">
-              <span className="text-muted-foreground">Tổng tiền</span>
-              <span className="font-semibold">{formatVND(selectedHairstyle?.price ?? 0)}</span>
+              <span className="text-zinc-500">Thời gian</span>
+              <span className="font-medium text-zinc-800">
+                {selectedTime} — {selectedDate?.toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric" })}
+              </span>
             </div>
           </div>
           <div className="flex gap-3">
-            <Button className="flex-1" asChild>
-              <Link href="/appointments">Xem lịch hẹn</Link>
-            </Button>
-            <Button variant="outline" className="flex-1" asChild>
-              <Link href="/">Trang chủ</Link>
-            </Button>
+            <button onClick={() => router.push("/appointments")}
+              className="flex-1 bg-zinc-900 text-white py-3 rounded-2xl font-medium text-sm hover:bg-zinc-800 transition-colors">
+              Xem lịch hẹn
+            </button>
+            <button onClick={() => router.push("/")}
+              className="flex-1 border border-zinc-200 text-zinc-700 py-3 rounded-2xl font-medium text-sm hover:bg-zinc-50 transition-colors">
+              Về trang chủ
+            </button>
           </div>
-        </div>
+        </motion.div>
       </div>
     );
   }
 
+  // ── Main ──────────────────────────────────────────────────────────────────
   return (
-    <div className="container py-10 px-4 md:px-6">
-      <div className="max-w-3xl mx-auto">
-        {/* Title */}
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold tracking-tight">Đặt lịch cắt tóc</h1>
-          <p className="text-muted-foreground mt-2">Chọn kiểu tóc, thợ và thời gian phù hợp</p>
-        </div>
-
-        <StepBar current={step} />
-
-        {/* ── Step 0: Chọn kiểu tóc ── */}
-        {step === 0 && (
-          <div className="space-y-6">
-            <Section title="Chọn kiểu tóc">
-              <div className="grid gap-3 sm:grid-cols-2">
-                {MOCK_HAIRSTYLES.map((h) => (
-                  <button
-                    key={h.id}
-                    type="button"
-                    onClick={() => setSelectedHairstyle(h)}
-                    className={cn(
-                      "rounded-xl border p-4 text-left transition-all hover:border-primary/60 hover:bg-muted/30",
-                      selectedHairstyle?.id === h.id
-                        ? "border-primary bg-primary/5 ring-1 ring-primary"
-                        : "border-border bg-card"
-                    )}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <Scissors className="h-4 w-4 text-primary shrink-0" />
-                          <p className="font-semibold text-sm">{h.name}</p>
-                        </div>
-                        <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">
-                          <span className="flex items-center gap-1">
-                            <Clock className="h-3 w-3" />
-                            {h.duration} phút
-                          </span>
-                          <span className="flex items-center gap-1">
-                            <Banknote className="h-3 w-3" />
-                            {formatVND(h.price)}
-                          </span>
-                        </div>
-                      </div>
-                      {selectedHairstyle?.id === h.id && (
-                        <div className="h-5 w-5 rounded-full bg-primary flex items-center justify-center shrink-0 mt-0.5">
-                          <Check className="h-3 w-3 text-primary-foreground" />
-                        </div>
-                      )}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </Section>
-
-            <div className="flex justify-end">
-              <Button onClick={() => setStep(1)} disabled={!canNextStep0} className="min-w-32">
-                Tiếp theo
-                <ChevronRight className="ml-1 h-4 w-4" />
-              </Button>
-            </div>
+    <div className="min-h-screen bg-[#f9f7f4]">
+      {/* Header */}
+      <div className="bg-zinc-900 pt-10 pb-6 px-4">
+        <div className="container">
+          <div className="flex items-center justify-between mb-6">
+            <h1 className="text-3xl font-bold text-white" style={{ fontFamily: "'Georgia', serif" }}>
+              Đặt lịch
+            </h1>
           </div>
-        )}
-
-        {/* ── Step 1: Thợ & Ngày giờ ── */}
-        {step === 1 && (
-          <div className="space-y-6">
-            <Section title="Chọn thợ cắt tóc">
-              <div className="grid gap-3 sm:grid-cols-3">
-                {MOCK_STYLISTS.map((s) => (
-                  <button
-                    key={s.id}
-                    type="button"
-                    onClick={() => setSelectedStylist(s)}
-                    className={cn(
-                      "rounded-xl border p-4 text-left transition-all hover:border-primary/60",
-                      selectedStylist?.id === s.id
-                        ? "border-primary bg-primary/5 ring-1 ring-primary"
-                        : "border-border bg-card"
-                    )}
-                  >
-                    <div className="flex items-center gap-3 mb-2">
-                      <StylistAvatar avatarUrl={s.avatarUrl} name={s.name} />
-                      <div className="min-w-0">
-                        <p className="font-semibold text-sm truncate">{s.name}</p>
-                        <StarRow rating={s.rating} />
-                      </div>
-                    </div>
-                    <div className="flex flex-wrap gap-1 mt-2">
-                      {s.specialties.map((sp) => (
-                        <span
-                          key={sp}
-                          className="px-2 py-0.5 rounded-full text-[11px] bg-muted text-muted-foreground"
-                        >
-                          {sp}
-                        </span>
-                      ))}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </Section>
-
-            <Section title="Chọn ngày">
-              <MiniCalendar selected={selectedDate} onSelect={setSelectedDate} />
-            </Section>
-
-            <Section title="Chọn giờ">
-              <div className="grid grid-cols-5 sm:grid-cols-8 gap-2">
-                {TIME_SLOTS.map((t) => (
-                  <button
-                    key={t}
-                    type="button"
-                    onClick={() => setSelectedTime(t)}
-                    className={cn(
-                      "rounded-lg border py-2 text-sm font-medium transition-all",
-                      selectedTime === t
-                        ? "bg-primary text-primary-foreground border-primary"
-                        : "border-border bg-card hover:border-primary/60 hover:bg-muted/30"
-                    )}
-                  >
-                    {t}
-                  </button>
-                ))}
-              </div>
-            </Section>
-
-            <div className="flex justify-between">
-              <Button variant="outline" onClick={() => setStep(0)}>
-                <ChevronLeft className="mr-1 h-4 w-4" />
-                Quay lại
-              </Button>
-              <Button onClick={() => setStep(2)} disabled={!canNextStep1} className="min-w-32">
-                Tiếp theo
-                <ChevronRight className="ml-1 h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* ── Step 2: Thông tin khách hàng ── */}
-        {step === 2 && (
-          <div className="space-y-6">
-            <Section title="Thông tin liên hệ">
-              <div className="rounded-xl border bg-card p-5 space-y-4">
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="cname" className="text-sm">
-                      Họ và tên <span className="text-red-500">*</span>
-                    </Label>
-                    <div className="relative">
-                      <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                      <Input
-                        id="cname"
-                        value={customerName}
-                        onChange={(e) => setCustomerName(e.target.value)}
-                        placeholder="Nguyễn Văn A"
-                        className="pl-9"
-                      />
-                    </div>
+          {/* Steps */}
+          <div className="flex items-center">
+            {STEPS.map((s, i) => (
+              <div key={s.id} className="flex items-center flex-1 last:flex-none">
+                <button onClick={() => step > s.id && setStep(s.id)} className="flex flex-col items-center gap-1">
+                  <div className={cn(
+                    "w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold border-2 transition-all",
+                    step === s.id ? "bg-amber-400 border-amber-400 text-zinc-900"
+                    : step > s.id ? "bg-emerald-500 border-emerald-500 text-white"
+                    :               "bg-transparent border-zinc-600 text-zinc-500"
+                  )}>
+                    {step > s.id ? <Check className="h-4 w-4" /> : s.id}
                   </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="cphone" className="text-sm">
-                      Số điện thoại <span className="text-red-500">*</span>
-                    </Label>
-                    <div className="relative">
-                      <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                      <Input
-                        id="cphone"
-                        value={customerPhone}
-                        onChange={(e) =>
-                          setCustomerPhone(e.target.value.replace(/\D/g, "").slice(0, 11))
-                        }
-                        placeholder="0912345678"
-                        className="pl-9"
-                      />
-                    </div>
-                  </div>
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="cemail" className="text-sm">Email</Label>
-                  <div className="relative">
-                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      id="cemail"
-                      type="email"
-                      value={customerEmail}
-                      onChange={(e) => setCustomerEmail(e.target.value)}
-                      placeholder="example@gmail.com"
-                      className="pl-9"
-                    />
-                  </div>
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="notes" className="text-sm">Ghi chú</Label>
-                  <div className="relative">
-                    <StickyNote className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                    <Textarea
-                      id="notes"
-                      value={notes}
-                      onChange={(e) => setNotes(e.target.value)}
-                      placeholder="Ví dụ: Khách muốn cắt ngắn hai bên..."
-                      className="pl-9 resize-none min-h-[80px]"
-                    />
-                  </div>
-                </div>
-              </div>
-            </Section>
-
-            <Section title="Đặt cọc">
-              <div className="rounded-xl border bg-card p-5 space-y-4">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Tổng tiền dịch vụ</span>
-                  <span className="font-semibold">{formatVND(selectedHairstyle?.price ?? 0)}</span>
-                </div>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Tiền cọc (25%)</span>
-                  <span className="font-semibold text-amber-600">{formatVND(depositAmount)}</span>
-                </div>
-                <div className="border-t pt-3">
-                  <button
-                    type="button"
-                    onClick={() => setDepositPaid((v) => !v)}
-                    className={cn(
-                      "w-full flex items-center gap-3 rounded-lg border p-3 text-sm transition-all",
-                      depositPaid
-                        ? "border-emerald-400 bg-emerald-50 text-emerald-700"
-                        : "border-border hover:border-primary/60"
-                    )}
-                  >
-                    <div
-                      className={cn(
-                        "h-5 w-5 rounded flex items-center justify-center shrink-0 border-2 transition-all",
-                        depositPaid
-                          ? "bg-emerald-500 border-emerald-500"
-                          : "border-muted-foreground"
-                      )}
-                    >
-                      {depositPaid && <Check className="h-3 w-3 text-white" />}
-                    </div>
-                    <CreditCard className="h-4 w-4 shrink-0" />
-                    <span className="font-medium">Tôi đồng ý đặt cọc {formatVND(depositAmount)}</span>
-                  </button>
-                </div>
-              </div>
-            </Section>
-
-            <div className="flex justify-between">
-              <Button variant="outline" onClick={() => setStep(1)}>
-                <ChevronLeft className="mr-1 h-4 w-4" />
-                Quay lại
-              </Button>
-              <Button onClick={() => setStep(3)} disabled={!canNextStep2} className="min-w-32">
-                Xem lại
-                <ChevronRight className="ml-1 h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* ── Step 3: Xác nhận ── */}
-        {step === 3 && (
-          <div className="space-y-6">
-            <Section title="Xác nhận thông tin đặt lịch">
-              <div className="rounded-xl border bg-card divide-y">
-                {/* Kiểu tóc */}
-                <div className="flex items-start gap-3 p-4">
-                  <div className="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-                    <Scissors className="h-4 w-4 text-primary" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs text-muted-foreground">Kiểu tóc</p>
-                    <p className="font-semibold text-sm">{selectedHairstyle?.name}</p>
-                    <div className="flex items-center gap-3 mt-0.5 text-xs text-muted-foreground">
-                      <span>{selectedHairstyle?.duration} phút</span>
-                      <span>{formatVND(selectedHairstyle?.price ?? 0)}</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Thợ */}
-                <div className="flex items-start gap-3 p-4">
-                  <div className="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-                    <User className="h-4 w-4 text-primary" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs text-muted-foreground">Thợ cắt tóc</p>
-                    <p className="font-semibold text-sm">{selectedStylist?.name}</p>
-                  </div>
-                </div>
-
-                {/* Ngày giờ */}
-                <div className="flex items-start gap-3 p-4">
-                  <div className="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-                    <CalendarDays className="h-4 w-4 text-primary" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs text-muted-foreground">Ngày & Giờ</p>
-                    <p className="font-semibold text-sm">
-                      {selectedDate && format(selectedDate, "EEEE, dd/MM/yyyy", { locale: vi })}
-                      {" · "}
-                      {selectedTime}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Khách hàng */}
-                <div className="flex items-start gap-3 p-4">
-                  <div className="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-                    <Phone className="h-4 w-4 text-primary" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs text-muted-foreground">Thông tin liên hệ</p>
-                    <p className="font-semibold text-sm">{customerName}</p>
-                    <p className="text-xs text-muted-foreground">{customerPhone}</p>
-                    {customerEmail && (
-                      <p className="text-xs text-muted-foreground">{customerEmail}</p>
-                    )}
-                  </div>
-                </div>
-
-                {/* Ghi chú */}
-                {notes && (
-                  <div className="flex items-start gap-3 p-4">
-                    <div className="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-                      <StickyNote className="h-4 w-4 text-primary" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs text-muted-foreground">Ghi chú</p>
-                      <p className="text-sm">{notes}</p>
-                    </div>
-                  </div>
+                  <span className={cn("text-xs hidden sm:block", step === s.id ? "text-amber-400 font-medium" : "text-zinc-500")}>
+                    {s.label}
+                  </span>
+                </button>
+                {i < STEPS.length - 1 && (
+                  <div className={cn("flex-1 h-px mx-2 transition-colors", step > s.id ? "bg-emerald-500" : "bg-zinc-700")} />
                 )}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
 
-                {/* Thanh toán */}
-                <div className="p-4 bg-muted/30">
-                  <div className="flex justify-between text-sm mb-1">
-                    <span className="text-muted-foreground">Tổng tiền</span>
-                    <span className="font-semibold">{formatVND(selectedHairstyle?.price ?? 0)}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Đặt cọc</span>
-                    <span
+      {/* Content */}
+      <div className="container py-8 px-4">
+        <AnimatePresence mode="wait">
+
+          {/* STEP 1 */}
+          {step === 1 && (
+            <motion.div key="s1"
+              initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -30 }} transition={{ duration: 0.22 }}
+            >
+              <h2 className="text-xl font-bold text-zinc-900 mb-1">Chọn kiểu tóc</h2>
+              <p className="text-sm text-zinc-500 mb-5">Chọn kiểu tóc bạn muốn thực hiện</p>
+
+              <div className="flex gap-2 overflow-x-auto pb-2 mb-5 scrollbar-hide">
+                {categories.map((cat) => (
+                  <button key={cat} onClick={() => setActiveCategory(cat)}
+                    className={cn(
+                      "shrink-0 px-4 py-1.5 rounded-full text-sm font-medium border transition-all",
+                      activeCategory === cat ? "bg-zinc-900 text-white border-zinc-900" : "bg-white text-zinc-600 border-zinc-200 hover:border-zinc-400"
+                    )}>
+                    {CATEGORY_LABELS[cat] ?? cat}
+                  </button>
+                ))}
+              </div>
+
+              {loadingStyles ? (
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                  {Array.from({ length: 8 }).map((_, i) => (
+                    <div key={i} className="rounded-2xl overflow-hidden bg-white animate-pulse">
+                      <div className="aspect-[3/4] bg-zinc-200" />
+                      <div className="p-3 space-y-2">
+                        <div className="h-4 bg-zinc-200 rounded w-3/4" />
+                        <div className="h-3 bg-zinc-100 rounded w-1/2" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                  {filteredStyles.map((style) => (
+                    <div key={style.id} onClick={() => setSelectedStyle(style)}
                       className={cn(
-                        "font-semibold",
-                        depositPaid ? "text-emerald-600" : "text-muted-foreground"
+                        "group cursor-pointer bg-white rounded-2xl overflow-hidden border-2 transition-all duration-200 shadow-sm hover:shadow-md",
+                        selectedStyle?.id === style.id ? "border-amber-400 shadow-amber-100 shadow-md" : "border-transparent hover:border-zinc-200"
                       )}
                     >
-                      {depositPaid ? `${formatVND(depositAmount)} ✓` : "Không đặt cọc"}
+                      <div className="relative aspect-[3/4] bg-zinc-100 overflow-hidden">
+                        <img src={style.imageUrl} alt={style.name}
+                          className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
+                        {selectedStyle?.id === style.id && (
+                          <div className="absolute top-2 right-2 w-7 h-7 bg-amber-400 rounded-full flex items-center justify-center shadow">
+                            <Check className="h-4 w-4 text-zinc-900" />
+                          </div>
+                        )}
+                        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-3">
+                          <span className="text-white text-xs font-bold">{formatPrice(style.price)}</span>
+                        </div>
+                      </div>
+                      <div className="p-3">
+                        <h3 className="font-semibold text-zinc-900 text-sm truncate">{style.name}</h3>
+                        <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                          <span className="flex items-center gap-1 text-xs text-zinc-400">
+                            <Clock className="h-3 w-3" />{formatDuration(style.duration)}
+                          </span>
+                          <span className={cn("text-xs px-2 py-0.5 rounded-full border font-medium", DIFFICULTY_CONFIG[style.difficulty]?.color)}>
+                            {DIFFICULTY_CONFIG[style.difficulty]?.label}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </motion.div>
+          )}
+
+          {/* STEP 2 */}
+          {step === 2 && (
+            <motion.div key="s2"
+              initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -30 }} transition={{ duration: 0.22 }}
+            >
+              <h2 className="text-xl font-bold text-zinc-900 mb-1">Chọn thợ cắt tóc</h2>
+              <p className="text-sm text-zinc-500 mb-6">
+                Thợ phù hợp với kiểu <span className="font-medium text-zinc-800">{selectedStyle?.name}</span>
+              </p>
+
+              {loadingStylists ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {Array.from({ length: 4 }).map((_, i) => (
+                    <div key={i} className="bg-white rounded-2xl p-4 animate-pulse flex gap-4">
+                      <div className="w-16 h-16 rounded-full bg-zinc-200 shrink-0" />
+                      <div className="flex-1 space-y-2 pt-1">
+                        <div className="h-4 bg-zinc-200 rounded w-3/4" />
+                        <div className="h-3 bg-zinc-100 rounded w-1/2" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {/* Any stylist option */}
+                  <div
+                    onClick={() => setSelectedStylist({ id: "", fullName: "Bất kỳ thợ nào", avatarUrl: null, experience: 0, rating: 0, totalBookings: 0, specialties: [], isAvailable: true })}
+                    className={cn(
+                      "cursor-pointer bg-white rounded-2xl p-4 border-2 transition-all flex items-center gap-4 shadow-sm",
+                      selectedStylist?.id === "" ? "border-amber-400 shadow-amber-100 shadow-md" : "border-transparent hover:border-zinc-200"
+                    )}
+                  >
+                    <div className="w-14 h-14 rounded-full bg-zinc-100 flex items-center justify-center shrink-0">
+                      <User className="h-7 w-7 text-zinc-400" />
+                    </div>
+                    <div className="flex-1">
+                      <p className="font-semibold text-zinc-800">Bất kỳ thợ nào</p>
+                      <p className="text-xs text-zinc-400 mt-0.5">Chúng tôi sẽ sắp xếp phù hợp</p>
+                    </div>
+                    {selectedStylist?.id === "" && <Check className="h-5 w-5 text-amber-500 shrink-0" />}
+                  </div>
+
+                  {stylists.map((stylist) => (
+                    <div key={stylist.id}
+                      onClick={() => stylist.isAvailable && setSelectedStylist(stylist)}
+                      className={cn(
+                        "bg-white rounded-2xl p-4 border-2 transition-all flex items-center gap-4 shadow-sm",
+                        stylist.isAvailable ? "cursor-pointer" : "cursor-not-allowed opacity-50",
+                        selectedStylist?.id === stylist.id ? "border-amber-400 shadow-amber-100 shadow-md" : "border-transparent hover:border-zinc-200"
+                      )}
+                    >
+                      <div className="relative shrink-0">
+                        {stylist.avatarUrl ? (
+                          <img src={stylist.avatarUrl} alt={stylist.fullName} className="w-14 h-14 rounded-full object-cover" />
+                        ) : (
+                          <div className="w-14 h-14 rounded-full bg-zinc-100 flex items-center justify-center">
+                            <User className="h-7 w-7 text-zinc-400" />
+                          </div>
+                        )}
+                        {!stylist.isAvailable && (
+                          <div className="absolute inset-0 rounded-full bg-white/60 flex items-center justify-center">
+                            <span className="text-[9px] font-bold text-zinc-500">Bận</span>
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-zinc-800 truncate">{stylist.fullName}</p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          {stylist.rating > 0 && (
+                            <span className="flex items-center gap-0.5 text-xs text-amber-500">
+                              <Star className="h-3 w-3 fill-amber-400" />{stylist.rating.toFixed(1)}
+                            </span>
+                          )}
+                          {stylist.experience > 0 && (
+                            <span className="text-xs text-zinc-400">{stylist.experience} năm KN</span>
+                          )}
+                        </div>
+                        {stylist.specialties?.length > 0 && (
+                          <p className="text-xs text-zinc-400 truncate mt-0.5">{stylist.specialties.slice(0, 2).join(", ")}</p>
+                        )}
+                      </div>
+                      {selectedStylist?.id === stylist.id && <Check className="h-5 w-5 text-amber-500 shrink-0" />}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </motion.div>
+          )}
+
+          {/* STEP 3 */}
+          {step === 3 && (
+            <motion.div key="s3"
+              initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -30 }} transition={{ duration: 0.22 }}
+            >
+              <h2 className="text-xl font-bold text-zinc-900 mb-1">Chọn thời gian</h2>
+              <p className="text-sm text-zinc-500 mb-6">Chọn ngày và khung giờ phù hợp</p>
+
+              <h3 className="text-sm font-semibold text-zinc-700 mb-3">Chọn ngày</h3>
+              <div className="flex gap-2 overflow-x-auto pb-2 mb-7 scrollbar-hide">
+                {days.map((day) => {
+                  const isSelected = selectedDate?.toDateString() === day.toDateString();
+                  const isToday    = new Date().toDateString() === day.toDateString();
+                  return (
+                    <button key={day.toISOString()} onClick={() => setSelectedDate(day)}
+                      className={cn(
+                        "shrink-0 flex flex-col items-center py-3 px-4 rounded-2xl border-2 transition-all min-w-[64px]",
+                        isSelected ? "bg-zinc-900 border-zinc-900 text-white" : "bg-white border-zinc-200 text-zinc-700 hover:border-zinc-400"
+                      )}
+                    >
+                      <span className="text-[11px] text-zinc-400 mb-1">{isToday ? "Hôm nay" : DAY_LABELS[day.getDay()]}</span>
+                      <span className="text-xl font-bold leading-none">{day.getDate()}</span>
+                      <span className="text-[11px] text-zinc-400 mt-1">Th{day.getMonth() + 1}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <h3 className="text-sm font-semibold text-zinc-700 mb-3">Chọn giờ</h3>
+              {!selectedDate ? (
+                <p className="text-sm text-zinc-400 italic">Vui lòng chọn ngày trước</p>
+              ) : loadingTimes ? (
+                <div className="flex items-center gap-2 text-sm text-zinc-400">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Đang tải khung giờ...
+                </div>
+              ) : availableTimes.length === 0 ? (
+                <p className="text-sm text-zinc-400 italic">Không có khung giờ nào cho ngày này</p>
+              ) : (
+                <>
+                  <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+                    {availableTimes.map((slot) => {
+                      const isSelected = selectedTime === slot.startTime;
+                      const isBooked   = !slot.isAvailable;
+                      return (
+                        <button
+                          key={slot.startTime}
+                          disabled={isBooked}
+                          onClick={() => !isBooked && setSelectedTime(slot.startTime)}
+                          className={cn(
+                            "relative py-2.5 px-2 rounded-xl text-sm font-medium border-2 transition-all flex flex-col items-center gap-0.5",
+                            isBooked
+                              ? "bg-zinc-50 border-zinc-100 text-zinc-300 cursor-not-allowed line-through"
+                              : isSelected
+                              ? "bg-zinc-900 border-zinc-900 text-white shadow-md"
+                              : "bg-white border-zinc-200 text-zinc-700 hover:border-zinc-400 hover:shadow-sm"
+                          )}
+                        >
+                          <span>{slot.startTime}</span>
+                          <span className={cn(
+                            "text-[10px]",
+                            isBooked ? "text-zinc-300" : isSelected ? "text-zinc-400" : "text-zinc-400"
+                          )}>
+                            {slot.endTime}
+                          </span>
+                          {isBooked && (
+                            <span className="absolute -top-1.5 -right-1.5 bg-rose-100 text-rose-500 text-[9px] font-bold px-1 rounded-full border border-rose-200">
+                              Bận
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-xs text-zinc-400 mt-3 flex items-center gap-3">
+                    <span className="flex items-center gap-1">
+                      <span className="w-3 h-3 rounded bg-white border-2 border-zinc-200 inline-block" />
+                      Còn trống
                     </span>
+                    <span className="flex items-center gap-1">
+                      <span className="w-3 h-3 rounded bg-zinc-50 border-2 border-zinc-100 inline-block" />
+                      Đã đặt
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="w-3 h-3 rounded bg-zinc-900 inline-block" />
+                      Đang chọn
+                    </span>
+                  </p>
+                </>
+              )}
+            </motion.div>
+          )}
+
+          {/* STEP 4 */}
+          {step === 4 && (
+            <motion.div key="s4"
+              initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -30 }} transition={{ duration: 0.22 }}
+            >
+              <h2 className="text-xl font-bold text-zinc-900 mb-1">Xác nhận đặt lịch</h2>
+              <p className="text-sm text-zinc-500 mb-6">Kiểm tra thông tin và để lại liên hệ</p>
+
+              <div className="grid md:grid-cols-2 gap-6">
+                {/* Summary */}
+                <div className="bg-white rounded-2xl p-5 shadow-sm border border-zinc-100 space-y-4">
+                  <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-widest">Tóm tắt lịch hẹn</h3>
+                  <div className="flex gap-3 items-start">
+                    <div className="w-16 h-20 rounded-xl overflow-hidden bg-zinc-100 shrink-0">
+                      <img src={selectedStyle?.imageUrl} alt={selectedStyle?.name} className="w-full h-full object-cover" />
+                    </div>
+                    <div>
+                      <p className="font-semibold text-zinc-900">{selectedStyle?.name}</p>
+                      <p className="text-xs text-zinc-400 mt-0.5">{CATEGORY_LABELS[selectedStyle?.category ?? ""] ?? selectedStyle?.category}</p>
+                      <div className="flex items-center gap-2 mt-1.5">
+                        <span className="text-sm font-bold text-amber-600">{formatPrice(selectedStyle?.price ?? 0)}</span>
+                        <span className="text-zinc-300">·</span>
+                        <span className="text-xs text-zinc-400">{formatDuration(selectedStyle?.duration ?? 0)}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="border-t border-zinc-100 pt-3 space-y-2.5 text-sm">
+                    <div className="flex items-center gap-3">
+                      <User className="h-4 w-4 text-zinc-400 shrink-0" />
+                      <span className="text-zinc-700">{selectedStylist?.id ? selectedStylist.fullName : "Bất kỳ thợ nào"}</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <CalendarDays className="h-4 w-4 text-zinc-400 shrink-0" />
+                      <span className="text-zinc-700">
+                        {selectedTime} — {selectedDate?.toLocaleDateString("vi-VN", { weekday: "long", day: "2-digit", month: "2-digit", year: "numeric" })}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Contact form */}
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-sm font-medium text-zinc-700 mb-1.5 flex items-center gap-1.5">
+                      <User className="h-4 w-4" /> Họ tên
+                      <span className="text-zinc-400 font-normal text-xs">(tùy chọn)</span>
+                    </label>
+                    <input type="text" value={username} onChange={(e) => setUsername(e.target.value)}
+                      placeholder="Nguyễn Văn A"
+                      className="w-full border border-zinc-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-zinc-900 transition-colors bg-white" />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-zinc-700 mb-1.5 flex items-center gap-1.5">
+                      <Phone className="h-4 w-4" /> Số điện thoại
+                      <span className="text-red-400 text-xs">*</span>
+                    </label>
+                    <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)}
+                      placeholder="0912 345 678"
+                      className="w-full border border-zinc-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-zinc-900 transition-colors bg-white" />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-zinc-700 mb-1.5 flex items-center gap-1.5">
+                      <StickyNote className="h-4 w-4" /> Ghi chú
+                      <span className="text-zinc-400 font-normal text-xs">(tùy chọn)</span>
+                    </label>
+                    <textarea value={notes} onChange={(e) => setNotes(e.target.value)}
+                      placeholder="Yêu cầu đặc biệt, màu tóc mong muốn..."
+                      rows={4}
+                      className="w-full border border-zinc-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-zinc-900 transition-colors bg-white resize-none" />
                   </div>
                 </div>
               </div>
-            </Section>
+            </motion.div>
+          )}
 
-            <div className="flex justify-between">
-              <Button variant="outline" onClick={() => setStep(2)}>
-                <ChevronLeft className="mr-1 h-4 w-4" />
-                Quay lại
-              </Button>
-              <Button
-                onClick={() => {
-                  // TODO: gọi API tại đây
-                  setIsComplete(true);
-                }}
-                className="min-w-40"
-              >
-                <Check className="mr-1.5 h-4 w-4" />
-                Xác nhận đặt lịch
-              </Button>
+        </AnimatePresence>
+
+        {/* Bottom bar */}
+        <div className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur border-t border-zinc-200 px-4 py-4 z-20">
+          <div className="container flex items-center gap-3">
+            {selectedStyle && (
+              <div className="hidden sm:flex items-center gap-2 bg-zinc-50 border border-zinc-200 rounded-full px-3 py-1.5 text-xs text-zinc-600 mr-auto">
+                <Scissors className="h-3.5 w-3.5" />
+                <span className="font-medium">{selectedStyle.name}</span>
+                <span className="text-zinc-300">·</span>
+                <span className="text-amber-600 font-bold">{formatPrice(selectedStyle.price)}</span>
+              </div>
+            )}
+            <div className="flex gap-3 ml-auto">
+              {step > 1 && (
+                <button onClick={() => setStep((s) => s - 1)}
+                  className="flex items-center gap-1.5 px-5 py-2.5 rounded-2xl border border-zinc-200 text-zinc-700 text-sm font-medium hover:bg-zinc-50 transition-colors">
+                  <ChevronLeft className="h-4 w-4" /> Quay lại
+                </button>
+              )}
+              {step < 4 ? (
+                <button disabled={!canNext()} onClick={() => setStep((s) => s + 1)}
+                  className={cn(
+                    "flex items-center gap-1.5 px-6 py-2.5 rounded-2xl text-sm font-medium transition-all",
+                    canNext() ? "bg-zinc-900 text-white hover:bg-zinc-800 shadow-lg" : "bg-zinc-200 text-zinc-400 cursor-not-allowed"
+                  )}>
+                  Tiếp theo <ChevronRight className="h-4 w-4" />
+                </button>
+              ) : (
+                <button disabled={!phone || submitting} onClick={handleSubmit}
+                  className={cn(
+                    "flex items-center gap-2 px-7 py-2.5 rounded-2xl text-sm font-semibold transition-all",
+                    phone && !submitting ? "bg-amber-400 text-zinc-900 hover:bg-amber-500 shadow-lg" : "bg-zinc-200 text-zinc-400 cursor-not-allowed"
+                  )}>
+                  {submitting
+                    ? <><Loader2 className="h-4 w-4 animate-spin" /> Đang đặt...</>
+                    : <><CheckCircle2 className="h-4 w-4" /> Xác nhận đặt lịch</>}
+                </button>
+              )}
             </div>
           </div>
-        )}
+        </div>
+        <div className="h-24" />
       </div>
     </div>
   );
