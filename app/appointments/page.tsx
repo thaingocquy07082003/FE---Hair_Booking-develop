@@ -1,699 +1,781 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import {
-  useReactTable,
-  getCoreRowModel,
-  flexRender,
-  createColumnHelper,
-} from "@tanstack/react-table";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { useEffect, useState, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  cancelAppointment,
-  getAppointments,
-} from "@/services/appointment/appointment";
-import api from "@/lib/axios";
+  CalendarDays, Clock, Scissors, User, Phone, Mail,
+  ChevronRight, X, AlertTriangle, CheckCircle2,
+  XCircle, Loader2, RefreshCw, Eye, Ban, Hourglass,
+  DollarSign, FileText, ArrowLeft,
+} from "lucide-react";
+import { getCookie } from "@/lib/cookie";
 import { toast } from "sonner";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { MoreVertical, Star, Eye } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { getInvoicesListByUser } from "@/services/invoices/invoice.api";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import { Textarea } from "@/components/ui/textarea";
-import { createReview, updateReview } from "@/services/review/review.api";
 
-type Appointment = {
-  id: number;
-  _id: string;
-  service: string;
-  date: Date;
-  username: string;
-  phone: string;
-  notes: string;
-  branch: string;
-  status: "accepted" | "cancelled";
-};
-
-type ServiceHistory = {
+// ─── Types ────────────────────────────────────────────────────────────────────
+interface Appointment {
   id: string;
-  _id: string;
-  date: string;
-  service: string;
-  stylist: string;
-  total: string;
-  phone: string;
-  branchId: string;
-  branch: string;
-  username: string;
+  customerId: string;
   stylistId: string;
-  serviceId: string;
-  rating?: number;
-  review?: string;
-  reviewId?: string;
+  hairstyleId: string;
+  appointmentDate: string;
+  startTime: string;
+  endTime: string;
+  duration: number;
+  status: "pending" | "confirmed" | "completed" | "cancelled" | "no_show";
+  customerName: string;
+  customerPhone: string;
+  customerEmail: string;
+  notes: string | null;
+  cancellationReason: string | null;
+  price: number;
+  depositAmount: number;
+  depositPaid: boolean;
+  reminderSent: boolean;
+  createdAt: string;
+  updatedAt: string;
+  confirmedAt?: string;
+  completedAt?: string;
+  stylistName: string;
+  stylistAvatar: string | null;
+  hairstyleName: string;
+  hairstyleImage: string;
+  customerFullName: string;
+  customerUserEmail: string;
+  customerUserPhone: string;
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function formatPrice(p: number) {
+  return p.toLocaleString("vi-VN") + "đ";
+}
+
+function formatDate(dateStr: string) {
+  const d = new Date(dateStr);
+  return d.toLocaleDateString("vi-VN", {
+    weekday: "long", day: "2-digit", month: "2-digit", year: "numeric",
+  });
+}
+
+function formatDateTime(dateStr: string) {
+  const d = new Date(dateStr);
+  return d.toLocaleString("vi-VN", {
+    day: "2-digit", month: "2-digit", year: "numeric",
+    hour: "2-digit", minute: "2-digit",
+  });
+}
+
+const STATUS_CONFIG: Record<string, {
+  label: string;
+  icon: React.ReactNode;
+  badge: string;
+  dot: string;
+}> = {
+  pending: {
+    label: "Chờ xác nhận",
+    icon: <Hourglass className="h-3.5 w-3.5" />,
+    badge: "bg-amber-50 text-amber-700 border-amber-200",
+    dot: "bg-amber-400",
+  },
+  confirmed: {
+    label: "Đã xác nhận",
+    icon: <CheckCircle2 className="h-3.5 w-3.5" />,
+    badge: "bg-blue-50 text-blue-700 border-blue-200",
+    dot: "bg-blue-400",
+  },
+  completed: {
+    label: "Hoàn thành",
+    icon: <CheckCircle2 className="h-3.5 w-3.5" />,
+    badge: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    dot: "bg-emerald-500",
+  },
+  cancelled: {
+    label: "Đã hủy",
+    icon: <XCircle className="h-3.5 w-3.5" />,
+    badge: "bg-rose-50 text-rose-700 border-rose-200",
+    dot: "bg-rose-400",
+  },
+  no_show: {
+    label: "Vắng mặt",
+    icon: <Ban className="h-3.5 w-3.5" />,
+    badge: "bg-zinc-100 text-zinc-500 border-zinc-200",
+    dot: "bg-zinc-400",
+  },
 };
 
-export default function AppointmentsPage() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const initialTab = searchParams.get("tab") || "appointments";
-  const [activeTab, setActiveTab] = useState(initialTab);
-  const [appointmentsData, setAppointmentsData] = useState<Appointment[]>([]);
-  const [serviceHistoryData, setServiceHistoryData] = useState<
-    ServiceHistory[]
-  >([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [showCancelDialog, setShowCancelDialog] = useState(false);
-  const [selectedAppointmentId, setSelectedAppointmentId] = useState<
-    string | null
-  >(null);
-  const [showRatingDialog, setShowRatingDialog] = useState(false);
-  const [showDetailsDialog, setShowDetailsDialog] = useState(false);
-  const [selectedService, setSelectedService] = useState<ServiceHistory | null>(
-    null
-  );
-  const [rating, setRating] = useState(0);
-  const [review, setReview] = useState("");
-  const [isEditing, setIsEditing] = useState(false);
-
-  const handleCancelAppointment = async (appointmentId: string) => {
-    try {
-      await cancelAppointment(appointmentId);
-      toast.success("Hủy lịch thành công");
-      // Refresh appointments data
-      const appointmentsResponse = await getAppointments();
-      const updatedAppointments = appointmentsResponse.map(
-        (appointment: any, index: number) => ({
-          id: index + 1,
-          _id: appointment._id,
-          service: appointment.service,
-          date: new Date(appointment.date).toLocaleString("vi-VN"),
-          username: appointment.username,
-          branch: appointment.branch,
-          phone: appointment.phone,
-          notes: appointment.notes,
-          status: appointment.status,
-        })
-      );
-      setAppointmentsData(updatedAppointments);
-      setShowCancelDialog(false);
-      setSelectedAppointmentId(null);
-    } catch (error) {
-      toast.error("Không thể hủy lịch. Vui lòng thử lại sau.");
-    }
-  };
-
-  // Hàm tạo dữ liệu giả cho historyResponse
-  const getDataHistory = async (): Promise<ServiceHistory[]> => {
-    try {
-      const invoicesResponse = await getInvoicesListByUser();
-      console.log(invoicesResponse);
-      return invoicesResponse.map((invoice: any, index: number) => ({
-        id: index + 1,
-        _id: invoice.id,
-        date: new Date(invoice.date).toLocaleString("vi-VN"),
-        service: invoice.service,
-        stylist: invoice.stylist,
-        total: invoice.total,
-        phone: invoice.phone,
-        branchId: invoice.branchId,
-        branch: invoice.branch,
-        username: invoice.username,
-        stylistId: invoice.stylistId,
-        serviceId: invoice.serviceId,
-        reviewId: invoice.reviewId,
-        rating: invoice.rating,
-        review: invoice.review,
-      }));
-    } catch (error) {
-      console.error("Get fake history data error:", error);
-      return [];
-    }
-  };
-  // Gọi API và sử dụng dữ liệu giả cho historyResponse
-  useEffect(() => {
-    const fetchData = async () => {
-      setIsLoading(true);
-      try {
-        // Gọi API cho appointments (giữ nguyên nếu bạn muốn gọi API thật)
-        const appointmentsResponse = await getAppointments();
-        // const appointments = await appointmentsResponse.json();
-
-        const appointmentsData = appointmentsResponse.map(
-          (appointment: any, index: number) => ({
-            id: index + 1,
-            _id: appointment._id,
-            service: appointment.service,
-            date: new Date(appointment.date).toLocaleString("vi-VN"),
-            username: appointment.username,
-            branch: appointment.branch,
-            phone: appointment.phone,
-            notes: appointment.notes,
-            status: appointment.status,
-          })
-        );
-
-        setAppointmentsData(appointmentsData);
-
-        // Sử dụng dữ liệu giả cho historyResponse thay vì gọi API
-        const history = await getDataHistory();
-        setServiceHistoryData(history);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Lỗi get data ");
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchData();
-  }, []);
-
-  // Cập nhật tab khi search params thay đổi
-  useEffect(() => {
-    setActiveTab(initialTab);
-  }, [initialTab]);
-
-  const handleTabChange = (newTab: string) => {
-    setActiveTab(newTab);
-    router.replace(`?tab=${newTab}`, { scroll: false });
-  };
-
-  const appointmentColumnHelper = createColumnHelper<Appointment>();
-  const appointmentColumns = useMemo(
-    () => [
-      appointmentColumnHelper.accessor("id", { header: "STT" }),
-      appointmentColumnHelper.accessor("service", { header: "Dịch vụ" }),
-      appointmentColumnHelper.accessor("date", { header: "Thời gian đặt" }),
-      appointmentColumnHelper.accessor("username", { header: "Họ tên" }),
-      appointmentColumnHelper.accessor("phone", { header: "Số điện thoại" }),
-      appointmentColumnHelper.accessor("notes", { header: "Ghi chú" }),
-      appointmentColumnHelper.accessor("branch", { header: "Chi nhánh" }),
-      appointmentColumnHelper.accessor("status", {
-        header: "Trạng thái",
-        cell: (info) => {
-          const status = info.getValue();
-          const isAccepted = status === "accepted";
-          const appointmentDate = new Date(info.row.original.date);
-
-          return (
-            <div className="flex items-center gap-2">
-              <span
-                className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                  isAccepted
-                    ? "bg-green-100 text-green-800"
-                    : "bg-red-100 text-red-800"
-                }`}
-              >
-                {isAccepted ? "Xác nhận" : "Đã hủy"}
-              </span>
-              {isAccepted && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" className="h-8 w-8 p-0">
-                      <MoreVertical className="h-4 w-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem
-                      onClick={() => {
-                        setSelectedAppointmentId(info.row.original._id);
-                        setShowCancelDialog(true);
-                      }}
-                      className="text-red-600"
-                    >
-                      Hủy lịch
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
-            </div>
-          );
-        },
-      }),
-    ],
-    []
-  );
-
-  const historyColumnHelper = createColumnHelper<ServiceHistory>();
-  const serviceHistoryColumns = useMemo(
-    () => [
-      historyColumnHelper.accessor("id", { header: "STT" }),
-      historyColumnHelper.accessor("service", { header: "Dịch vụ" }),
-      historyColumnHelper.accessor("branch", { header: "Chi nhánh" }),
-      historyColumnHelper.accessor("stylist", { header: "Tên thợ cắt tóc" }),
-      historyColumnHelper.accessor("date", { header: "Ngày cắt tóc" }),
-      historyColumnHelper.accessor("total", { header: "Tổng tiền" }),
-      historyColumnHelper.display({
-        id: "actions",
-        header: "Đánh giá",
-        cell: (info) => {
-          const service = info.row.original;
-          return (
-            <div className="flex items-center gap-2">
-              {service.rating ? (
-                <div className="flex items-center gap-1">
-                  <div className="flex">
-                    {[1, 2, 3, 4, 5].map((star) => (
-                      <Star
-                        key={star}
-                        className={`h-4 w-4 ${
-                          star <= service.rating!
-                            ? "text-yellow-400 fill-yellow-400"
-                            : "text-gray-300"
-                        }`}
-                      />
-                    ))}
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => openRatingDialog(service)}
-                  >
-                    Sửa
-                  </Button>
-                </div>
-              ) : (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => openRatingDialog(service)}
-                >
-                  <Star className="h-4 w-4 mr-1" />
-                  Đánh giá
-                </Button>
-              )}
-            </div>
-          );
-        },
-      }),
-    ],
-    []
-  );
-
-  const appointmentsTable = useReactTable({
-    data: appointmentsData,
-    columns: appointmentColumns,
-    getCoreRowModel: getCoreRowModel(),
+// ─── API calls ────────────────────────────────────────────────────────────────
+async function fetchAppointments(): Promise<Appointment[]> {
+  const token = getCookie("accessToken");
+  const res = await fetch("http://localhost:3003/api/v1/appointments/my-appointments", {
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
   });
+  if (!res.ok) throw new Error("Không thể tải danh sách lịch hẹn");
+  const json = await res.json();
+  return json.data ?? [];
+}
 
-  const serviceHistoryTable = useReactTable({
-    data: serviceHistoryData,
-    columns: serviceHistoryColumns,
-    getCoreRowModel: getCoreRowModel(),
-  });
-
-  const handleRating = async () => {
-    if (!selectedService) return;
-    try {
-      if (isEditing) {
-        if (!selectedService.reviewId) {
-          toast.error("Không tìm thấy đánh giá để cập nhật");
-          return;
-        }
-        await updateReview({
-          rating,
-          review,
-          reviewId: selectedService.reviewId,
-        });
-        toast.success("Cập nhật đánh giá thành công!");
-      } else {
-        // Thêm đánh giá mới
-        console.log(
-          "==========================================",
-          selectedService
-        );
-        await createReview({
-          rating,
-          review,
-          invoiceId: selectedService._id,
-        });
-        toast.success("Cảm ơn bạn đã đánh giá!");
-      }
-
-      // Refresh data
-      const history = await getDataHistory();
-      setServiceHistoryData(history);
-
-      setShowRatingDialog(false);
-      setRating(0);
-      setReview("");
-      setIsEditing(false);
-    } catch (error) {
-      toast.error("Không thể gửi đánh giá. Vui lòng thử lại sau.");
+async function cancelAppointment(appointmentId: string, cancellationReason: string): Promise<void> {
+  const token = getCookie("accessToken");
+  const res = await fetch(
+    `http://localhost:3003/api/v1/appointments/${appointmentId}/cancel`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ cancellationReason }),
     }
-  };
+  );
+  if (!res.ok) throw new Error("Không thể hủy lịch hẹn");
+}
 
-  const openRatingDialog = (service: ServiceHistory) => {
-    setSelectedService(service);
-    if (service.rating) {
-      // Nếu đã có đánh giá, set giá trị hiện tại
-      setRating(service.rating);
-      setReview(service.review || "");
-      setIsEditing(true);
-    } else {
-      // Nếu chưa có đánh giá, reset form
-      setRating(0);
-      setReview("");
-      setIsEditing(false);
-    }
-    setShowRatingDialog(true);
-  };
+// ─── Status Badge ─────────────────────────────────────────────────────────────
+function StatusBadge({ status }: { status: string }) {
+  const cfg = STATUS_CONFIG[status] ?? STATUS_CONFIG.pending;
+  return (
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${cfg.badge}`}>
+      {cfg.icon}
+      {cfg.label}
+    </span>
+  );
+}
 
-  if (isLoading) {
-    return <div className="container py-12">Đang tải...</div>;
-  }
-
-  if (error) {
-    return <div className="container py-12">Lỗi: {error}</div>;
-  }
+// ─── Appointment Card ─────────────────────────────────────────────────────────
+function AppointmentCard({
+  appt,
+  onViewDetail,
+  onCancel,
+}: {
+  appt: Appointment;
+  onViewDetail: (a: Appointment) => void;
+  onCancel: (a: Appointment) => void;
+}) {
+  const cfg = STATUS_CONFIG[appt.status] ?? STATUS_CONFIG.pending;
+  const canCancel = appt.status === "pending" || appt.status === "confirmed";
 
   return (
-    <div className="container py-12">
-      <div className="flex mb-8 border-b">
-        <a
-          href="?tab=appointments"
-          onClick={(e) => {
-            e.preventDefault();
-            handleTabChange("appointments");
-          }}
-          className={`px-6 py-3 font-medium text-lg cursor-pointer relative ${
-            activeTab === "appointments"
-              ? "text-blue-600"
-              : "text-gray-500 hover:text-gray-700"
-          }`}
-        >
-          Lịch hẹn
-          {activeTab === "appointments" && (
-            <motion.div
-              layoutId="activeTab"
-              className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600"
-              initial={false}
-              transition={{ type: "spring", duration: 0.5 }}
-            />
-          )}
-        </a>
-        <a
-          href="?tab=history"
-          onClick={(e) => {
-            e.preventDefault();
-            handleTabChange("history");
-          }}
-          className={`px-6 py-3 font-medium text-lg cursor-pointer relative ${
-            activeTab === "history"
-              ? "text-blue-600"
-              : "text-gray-500 hover:text-gray-700"
-          }`}
-        >
-          Lịch sử
-          {activeTab === "history" && (
-            <motion.div
-              layoutId="activeTab"
-              className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600"
-              initial={false}
-              transition={{ type: "spring", duration: 0.5 }}
-            />
-          )}
-        </a>
-      </div>
+    <motion.div
+      layout
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -8 }}
+      className="group bg-white rounded-2xl border border-zinc-100 shadow-sm hover:shadow-md hover:border-zinc-200 transition-all duration-200 overflow-hidden"
+    >
+      {/* Top color stripe */}
+      <div className={`h-1 w-full ${cfg.dot}`} />
 
-      <AnimatePresence mode="wait">
-        <motion.div
-          key={activeTab}
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -10 }}
-          transition={{ duration: 0.2 }}
-        >
-          {activeTab === "appointments" ? (
-            <Card className="shadow-lg border-0">
-              <CardContent className="p-0">
-                <div className="overflow-x-auto rounded-lg">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                      {appointmentsTable
-                        .getHeaderGroups()
-                        .map((headerGroup) => (
-                          <tr key={headerGroup.id}>
-                            {headerGroup.headers.map((header) => (
-                              <th
-                                key={header.id}
-                                className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider"
-                              >
-                                {flexRender(
-                                  header.column.columnDef.header,
-                                  header.getContext()
-                                )}
-                              </th>
-                            ))}
-                          </tr>
-                        ))}
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {appointmentsTable.getRowModel().rows.map((row) => (
-                        <tr
-                          key={row.id}
-                          className="hover:bg-gray-50/50 transition-colors"
-                        >
-                          {row.getVisibleCells().map((cell) => (
-                            <td
-                              key={cell.id}
-                              className="px-6 py-4 whitespace-nowrap text-sm text-gray-600"
-                            >
-                              {flexRender(
-                                cell.column.columnDef.cell,
-                                cell.getContext()
-                              )}
-                            </td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </CardContent>
-            </Card>
-          ) : (
-            <Card className="shadow-lg border-0">
-              <CardContent className="p-0">
-                <div className="overflow-x-auto rounded-lg">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                      {serviceHistoryTable
-                        .getHeaderGroups()
-                        .map((headerGroup) => (
-                          <tr key={headerGroup.id}>
-                            {headerGroup.headers.map((header) => (
-                              <th
-                                key={header.id}
-                                className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider"
-                              >
-                                {flexRender(
-                                  header.column.columnDef.header,
-                                  header.getContext()
-                                )}
-                              </th>
-                            ))}
-                          </tr>
-                        ))}
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {serviceHistoryTable.getRowModel().rows.map((row) => (
-                        <tr
-                          key={row.id}
-                          className="hover:bg-gray-50/50 transition-colors"
-                        >
-                          {row.getVisibleCells().map((cell) => (
-                            <td
-                              key={cell.id}
-                              className="px-6 py-4 whitespace-nowrap text-sm text-gray-600"
-                            >
-                              {flexRender(
-                                cell.column.columnDef.cell,
-                                cell.getContext()
-                              )}
-                            </td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-        </motion.div>
-      </AnimatePresence>
-
-      <AlertDialog open={showCancelDialog} onOpenChange={setShowCancelDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Xác nhận hủy lịch</AlertDialogTitle>
-            <AlertDialogDescription>
-              Bạn có chắc chắn muốn hủy lịch hẹn này không?
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Không</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() =>
-                selectedAppointmentId &&
-                handleCancelAppointment(selectedAppointmentId)
-              }
-              className="bg-red-600 hover:bg-red-700"
-            >
-              Có, hủy lịch
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Rating Dialog */}
-      <Dialog open={showRatingDialog} onOpenChange={setShowRatingDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              {isEditing ? "Sửa đánh giá" : "Đánh giá dịch vụ"}
-            </DialogTitle>
-            <DialogDescription>
-              {isEditing
-                ? "Cập nhật đánh giá của bạn về dịch vụ này"
-                : "Chia sẻ trải nghiệm của bạn về dịch vụ này"}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="flex items-center gap-2">
-              {[1, 2, 3, 4, 5].map((star) => (
-                <button
-                  key={star}
-                  onClick={() => setRating(star)}
-                  className="focus:outline-none"
-                >
-                  <Star
-                    className={`h-6 w-6 ${
-                      star <= rating
-                        ? "text-yellow-400 fill-yellow-400"
-                        : "text-gray-300"
-                    }`}
-                  />
-                </button>
-              ))}
+      <div className="p-5">
+        <div className="flex gap-4">
+          {/* Hairstyle image */}
+          <div className="relative shrink-0">
+            <div className="w-16 h-20 rounded-xl overflow-hidden bg-zinc-100 shadow-sm">
+              <img
+                src={appt.hairstyleImage}
+                alt={appt.hairstyleName}
+                className="w-full h-full object-cover"
+              />
             </div>
-            <Textarea
-              placeholder="Nhập đánh giá của bạn..."
-              value={review}
-              onChange={(e) => setReview(e.target.value)}
-              className="min-h-[100px]"
-            />
-            <div className="flex justify-end gap-2">
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setShowRatingDialog(false);
-                  setRating(0);
-                  setReview("");
-                  setIsEditing(false);
-                }}
-              >
-                Hủy
-              </Button>
-              <Button onClick={handleRating}>
-                {isEditing ? "Cập nhật" : "Gửi đánh giá"}
-              </Button>
+            {appt.depositPaid && (
+              <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-emerald-500 rounded-full flex items-center justify-center shadow border-2 border-white">
+                <CheckCircle2 className="h-2.5 w-2.5 text-white" />
+              </div>
+            )}
+          </div>
+
+          {/* Content */}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <h3 className="font-semibold text-zinc-900 truncate text-sm">{appt.hairstyleName}</h3>
+                <p className="text-xs text-zinc-400 mt-0.5 flex items-center gap-1">
+                  <User className="h-3 w-3" />
+                  {appt.stylistName}
+                </p>
+              </div>
+              <StatusBadge status={appt.status} />
+            </div>
+
+            <div className="mt-3 space-y-1.5">
+              <div className="flex items-center gap-1.5 text-xs text-zinc-500">
+                <CalendarDays className="h-3.5 w-3.5 text-zinc-400" />
+                <span>{formatDate(appt.appointmentDate)}</span>
+              </div>
+              <div className="flex items-center gap-1.5 text-xs text-zinc-500">
+                <Clock className="h-3.5 w-3.5 text-zinc-400" />
+                <span>{appt.startTime} – {appt.endTime} ({appt.duration} phút)</span>
+              </div>
+              <div className="flex items-center gap-1.5 text-xs text-zinc-500">
+                <DollarSign className="h-3.5 w-3.5 text-zinc-400" />
+                <span className="font-medium text-zinc-700">{formatPrice(appt.price)}</span>
+                {appt.depositAmount > 0 && (
+                  <span className="text-zinc-400">
+                    · Cọc: <span className={appt.depositPaid ? "text-emerald-600 font-medium" : "text-amber-600"}>
+                      {formatPrice(appt.depositAmount)}
+                    </span>
+                  </span>
+                )}
+              </div>
             </div>
           </div>
-        </DialogContent>
-      </Dialog>
+        </div>
 
-      {/* Details Dialog */}
-      <Dialog open={showDetailsDialog} onOpenChange={setShowDetailsDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Chi tiết dịch vụ</DialogTitle>
-          </DialogHeader>
-          {selectedService && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+        {/* Actions */}
+        <div className="flex gap-2 mt-4 pt-4 border-t border-zinc-50">
+          <button
+            onClick={() => onViewDetail(appt)}
+            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl border border-zinc-200 text-zinc-600 text-xs font-medium hover:bg-zinc-50 hover:border-zinc-300 transition-all"
+          >
+            <Eye className="h-3.5 w-3.5" />
+            Xem chi tiết
+          </button>
+          {canCancel && (
+            <button
+              onClick={() => onCancel(appt)}
+              className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl border border-rose-200 text-rose-600 text-xs font-medium hover:bg-rose-50 transition-all"
+            >
+              <Ban className="h-3.5 w-3.5" />
+              Hủy lịch
+            </button>
+          )}
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+// ─── Detail Modal ─────────────────────────────────────────────────────────────
+function DetailModal({
+  appt,
+  onClose,
+  onCancel,
+}: {
+  appt: Appointment;
+  onClose: () => void;
+  onCancel: (a: Appointment) => void;
+}) {
+  const canCancel = appt.status === "pending" || appt.status === "confirmed";
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4"
+    >
+      {/* Backdrop */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+        onClick={onClose}
+      />
+
+      {/* Panel */}
+      <motion.div
+        initial={{ opacity: 0, y: 40, scale: 0.95 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 40, scale: 0.95 }}
+        transition={{ type: "spring", damping: 30, stiffness: 400 }}
+        className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden"
+      >
+        {/* Hero */}
+        <div className="relative h-44 bg-zinc-100">
+          <img
+            src={appt.hairstyleImage}
+            alt={appt.hairstyleName}
+            className="w-full h-full object-cover"
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
+
+          <button
+            onClick={onClose}
+            className="absolute top-3 right-3 w-8 h-8 rounded-full bg-black/30 hover:bg-black/50 flex items-center justify-center text-white transition-colors backdrop-blur-sm"
+          >
+            <X className="h-4 w-4" />
+          </button>
+
+          <div className="absolute bottom-4 left-4 right-4">
+            <h2 className="text-lg font-bold text-white">{appt.hairstyleName}</h2>
+            <div className="flex items-center gap-2 mt-1">
+              <StatusBadge status={appt.status} />
+            </div>
+          </div>
+        </div>
+
+        {/* Body */}
+        <div className="p-5 space-y-4 max-h-[60vh] overflow-y-auto">
+          {/* Stylist */}
+          <section>
+            <p className="text-[10px] font-semibold text-zinc-400 uppercase tracking-widest mb-2">Thợ cắt tóc</p>
+            <div className="flex items-center gap-3 p-3 bg-zinc-50 rounded-xl">
+              <div className="w-10 h-10 rounded-full bg-zinc-200 flex items-center justify-center">
+                {appt.stylistAvatar
+                  ? <img src={appt.stylistAvatar} className="w-full h-full rounded-full object-cover" />
+                  : <User className="h-5 w-5 text-zinc-400" />
+                }
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-zinc-800">{appt.stylistName}</p>
+                <p className="text-xs text-zinc-400">Thợ cắt tóc</p>
+              </div>
+            </div>
+          </section>
+
+          {/* Schedule */}
+          <section>
+            <p className="text-[10px] font-semibold text-zinc-400 uppercase tracking-widest mb-2">Thời gian</p>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="p-3 bg-zinc-50 rounded-xl">
+                <p className="text-[10px] text-zinc-400 mb-1">Ngày hẹn</p>
+                <p className="text-xs font-semibold text-zinc-800 leading-tight">
+                  {new Date(appt.appointmentDate).toLocaleDateString("vi-VN", {
+                    day: "2-digit", month: "2-digit", year: "numeric",
+                  })}
+                </p>
+              </div>
+              <div className="p-3 bg-zinc-50 rounded-xl">
+                <p className="text-[10px] text-zinc-400 mb-1">Khung giờ</p>
+                <p className="text-xs font-semibold text-zinc-800">{appt.startTime} – {appt.endTime}</p>
+                <p className="text-[10px] text-zinc-400">{appt.duration} phút</p>
+              </div>
+            </div>
+          </section>
+
+          {/* Customer */}
+          <section>
+            <p className="text-[10px] font-semibold text-zinc-400 uppercase tracking-widest mb-2">Thông tin khách hàng</p>
+            <div className="space-y-2">
+              <div className="flex items-center gap-2.5 p-3 bg-zinc-50 rounded-xl">
+                <User className="h-4 w-4 text-zinc-400 shrink-0" />
                 <div>
-                  <p className="text-sm font-medium text-gray-500">Dịch vụ</p>
-                  <p className="mt-1">{selectedService.service}</p>
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-gray-500">
-                    Thợ cắt tóc
-                  </p>
-                  <p className="mt-1">{selectedService.stylist}</p>
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-gray-500">
-                    Ngày thực hiện
-                  </p>
-                  <p className="mt-1">{selectedService.date}</p>
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-gray-500">Tổng tiền</p>
-                  <p className="mt-1">{selectedService.total}</p>
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-gray-500">Chi nhánh</p>
-                  <p className="mt-1">{selectedService.branchId}</p>
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-gray-500">
-                    Số điện thoại
-                  </p>
-                  <p className="mt-1">{selectedService.phone}</p>
+                  <p className="text-[10px] text-zinc-400">Họ tên</p>
+                  <p className="text-xs font-medium text-zinc-800">{appt.customerFullName}</p>
                 </div>
               </div>
-              {selectedService.rating && (
-                <div className="mt-4">
-                  <p className="text-sm font-medium text-gray-500">Đánh giá</p>
-                  <div className="flex items-center gap-1 mt-1">
-                    {[1, 2, 3, 4, 5].map((star) => (
-                      <Star
-                        key={star}
-                        className={`h-4 w-4 ${
-                          star <= selectedService.rating!
-                            ? "text-yellow-400 fill-yellow-400"
-                            : "text-gray-300"
-                        }`}
-                      />
-                    ))}
-                  </div>
-                  {selectedService.review && (
-                    <p className="mt-2 text-sm text-gray-600">
-                      {selectedService.review}
-                    </p>
-                  )}
+              <div className="flex items-center gap-2.5 p-3 bg-zinc-50 rounded-xl">
+                <Phone className="h-4 w-4 text-zinc-400 shrink-0" />
+                <div>
+                  <p className="text-[10px] text-zinc-400">Số điện thoại</p>
+                  <p className="text-xs font-medium text-zinc-800">{appt.customerUserPhone || appt.customerPhone}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2.5 p-3 bg-zinc-50 rounded-xl">
+                <Mail className="h-4 w-4 text-zinc-400 shrink-0" />
+                <div>
+                  <p className="text-[10px] text-zinc-400">Email</p>
+                  <p className="text-xs font-medium text-zinc-800 break-all">{appt.customerUserEmail || appt.customerEmail}</p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* Payment */}
+          <section>
+            <p className="text-[10px] font-semibold text-zinc-400 uppercase tracking-widest mb-2">Thanh toán</p>
+            <div className="p-3 bg-zinc-50 rounded-xl space-y-2">
+              <div className="flex justify-between text-xs">
+                <span className="text-zinc-500">Giá dịch vụ</span>
+                <span className="font-semibold text-zinc-800">{formatPrice(appt.price)}</span>
+              </div>
+              {appt.depositAmount > 0 && (
+                <div className="flex justify-between text-xs">
+                  <span className="text-zinc-500">Tiền cọc</span>
+                  <span className={`font-semibold ${appt.depositPaid ? "text-emerald-600" : "text-amber-600"}`}>
+                    {formatPrice(appt.depositAmount)} {appt.depositPaid ? "✓" : "(chưa cọc)"}
+                  </span>
                 </div>
               )}
             </div>
+          </section>
+
+          {/* Notes */}
+          {appt.notes && (
+            <section>
+              <p className="text-[10px] font-semibold text-zinc-400 uppercase tracking-widest mb-2">Ghi chú</p>
+              <div className="flex gap-2 p-3 bg-amber-50 border border-amber-100 rounded-xl">
+                <FileText className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+                <p className="text-xs text-amber-800">{appt.notes}</p>
+              </div>
+            </section>
           )}
-        </DialogContent>
-      </Dialog>
+
+          {/* Cancellation reason */}
+          {appt.cancellationReason && (
+            <section>
+              <p className="text-[10px] font-semibold text-zinc-400 uppercase tracking-widest mb-2">Lý do hủy</p>
+              <div className="flex gap-2 p-3 bg-rose-50 border border-rose-100 rounded-xl">
+                <XCircle className="h-4 w-4 text-rose-500 shrink-0 mt-0.5" />
+                <p className="text-xs text-rose-800">{appt.cancellationReason}</p>
+              </div>
+            </section>
+          )}
+
+          {/* Timestamps */}
+          <section>
+            <p className="text-[10px] font-semibold text-zinc-400 uppercase tracking-widest mb-2">Lịch sử</p>
+            <div className="space-y-1.5 text-xs text-zinc-500">
+              <div className="flex justify-between">
+                <span>Đặt lịch lúc</span>
+                <span className="font-medium text-zinc-700">{formatDateTime(appt.createdAt)}</span>
+              </div>
+              {appt.confirmedAt && (
+                <div className="flex justify-between">
+                  <span>Xác nhận lúc</span>
+                  <span className="font-medium text-zinc-700">{formatDateTime(appt.confirmedAt)}</span>
+                </div>
+              )}
+              {appt.completedAt && (
+                <div className="flex justify-between">
+                  <span>Hoàn thành lúc</span>
+                  <span className="font-medium text-zinc-700">{formatDateTime(appt.completedAt)}</span>
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
+
+        {/* Footer */}
+        <div className="p-4 border-t border-zinc-100 flex gap-2">
+          <button
+            onClick={onClose}
+            className="flex-1 py-2.5 rounded-xl border border-zinc-200 text-zinc-600 text-sm font-medium hover:bg-zinc-50 transition-colors"
+          >
+            Đóng
+          </button>
+          {canCancel && (
+            <button
+              onClick={() => { onClose(); onCancel(appt); }}
+              className="flex-1 py-2.5 rounded-xl bg-rose-500 text-white text-sm font-semibold hover:bg-rose-600 transition-colors flex items-center justify-center gap-1.5"
+            >
+              <Ban className="h-4 w-4" />
+              Hủy lịch hẹn
+            </button>
+          )}
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+// ─── Cancel Confirm Dialog ─────────────────────────────────────────────────────
+function CancelDialog({
+  appt,
+  onClose,
+  onConfirm,
+  loading,
+}: {
+  appt: Appointment;
+  onClose: () => void;
+  onConfirm: (reason: string) => void;
+  loading: boolean;
+}) {
+  const [reason, setReason] = useState("");
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+    >
+      <motion.div
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        onClick={onClose}
+      />
+      <motion.div
+        initial={{ scale: 0.9, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        exit={{ scale: 0.9, opacity: 0 }}
+        transition={{ type: "spring", damping: 30, stiffness: 400 }}
+        className="relative w-full max-w-sm bg-white rounded-3xl shadow-2xl p-6"
+      >
+        <div className="w-14 h-14 rounded-2xl bg-rose-100 flex items-center justify-center mx-auto mb-4">
+          <AlertTriangle className="h-7 w-7 text-rose-500" />
+        </div>
+        <h3 className="text-lg font-bold text-zinc-900 text-center mb-1">Xác nhận hủy lịch</h3>
+        <p className="text-sm text-zinc-500 text-center mb-1">Bạn sắp hủy lịch hẹn</p>
+        <p className="text-sm font-semibold text-zinc-800 text-center mb-1">{appt.hairstyleName}</p>
+        <p className="text-xs text-zinc-400 text-center mb-4">
+          {new Date(appt.appointmentDate).toLocaleDateString("vi-VN")} · {appt.startTime}
+        </p>
+
+        {/* Reason input */}
+        <div className="mb-4">
+          <label className="text-xs font-semibold text-zinc-600 mb-1.5 block">
+            Lý do hủy <span className="text-rose-400">*</span>
+          </label>
+          <textarea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="Ví dụ: Có lịch hẹn với đối tác..."
+            rows={3}
+            className="w-full border border-zinc-200 rounded-xl px-3 py-2.5 text-sm text-zinc-800 placeholder:text-zinc-300 outline-none focus:border-zinc-400 transition-colors resize-none"
+          />
+        </div>
+
+        {appt.depositPaid && appt.depositAmount > 0 && (
+          <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl mb-4">
+            <p className="text-xs text-amber-700 text-center">
+              ⚠️ Lưu ý: Tiền cọc <strong>{formatPrice(appt.depositAmount)}</strong> có thể không được hoàn trả.
+            </p>
+          </div>
+        )}
+
+        <div className="flex gap-2">
+          <button
+            onClick={onClose}
+            disabled={loading}
+            className="flex-1 py-2.5 rounded-xl border border-zinc-200 text-zinc-600 text-sm font-medium hover:bg-zinc-50 transition-colors disabled:opacity-50"
+          >
+            Không, giữ lại
+          </button>
+          <button
+            onClick={() => onConfirm(reason)}
+            disabled={loading || !reason.trim()}
+            className="flex-1 py-2.5 rounded-xl bg-rose-500 text-white text-sm font-semibold hover:bg-rose-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+          >
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />}
+            {loading ? "Đang hủy..." : "Hủy lịch"}
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+// ─── Filter Tabs ──────────────────────────────────────────────────────────────
+const FILTERS = [
+  { key: "all", label: "Tất cả" },
+  { key: "pending", label: "Chờ xác nhận" },
+  { key: "confirmed", label: "Đã xác nhận" },
+  { key: "completed", label: "Hoàn thành" },
+  { key: "cancelled", label: "Đã hủy" },
+];
+
+// ─── Main Page ────────────────────────────────────────────────────────────────
+export default function AppointmentsPage() {
+  const router = useRouter();
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [activeFilter, setActiveFilter] = useState("all");
+  const [selectedAppt, setSelectedAppt] = useState<Appointment | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<Appointment | null>(null);
+  const [cancelling, setCancelling] = useState(false);
+
+  const loadAppointments = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const data = await fetchAppointments();
+      setAppointments([...data].reverse());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Lỗi tải dữ liệu");
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadAppointments();
+  }, [loadAppointments]);
+
+  const handleCancel = async (reason: string) => {
+    if (!cancelTarget) return;
+    setCancelling(true);
+    try {
+      await cancelAppointment(cancelTarget.id, reason);
+      toast.success("Hủy lịch hẹn thành công");
+      setCancelTarget(null);
+      await loadAppointments();
+    } catch {
+      toast.error("Không thể hủy lịch hẹn. Vui lòng thử lại.");
+    } finally {
+      setCancelling(false);
+    }
+  };
+
+  const filtered = activeFilter === "all"
+    ? appointments
+    : appointments.filter((a) => a.status === activeFilter);
+
+  const counts = FILTERS.reduce((acc, f) => {
+    acc[f.key] = f.key === "all"
+      ? appointments.length
+      : appointments.filter((a) => a.status === f.key).length;
+    return acc;
+  }, {} as Record<string, number>);
+
+  return (
+    <div className="min-h-screen bg-[#f7f6f3]">
+      {/* Header */}
+      <div className="bg-zinc-900 pt-10 pb-6 px-4">
+        <div className="container max-w-2xl">
+          <div className="flex items-center gap-3 mb-1">
+            <button
+              onClick={() => router.push("/")}
+              className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-colors"
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </button>
+            <h1 className="text-2xl font-bold text-white" style={{ fontFamily: "'Georgia', serif" }}>
+              Lịch hẹn của tôi
+            </h1>
+          </div>
+          <p className="text-zinc-400 text-sm ml-11">
+            {appointments.length > 0
+              ? `${appointments.length} lịch hẹn`
+              : "Quản lý các lịch hẹn cắt tóc"}
+          </p>
+
+          {/* Filter pills */}
+          <div className="flex gap-2 overflow-x-auto pb-1 mt-5 scrollbar-hide">
+            {FILTERS.map((f) => {
+              const isActive = activeFilter === f.key;
+              const count = counts[f.key];
+              if (count === 0 && f.key !== "all") return null;
+              return (
+                <button
+                  key={f.key}
+                  onClick={() => setActiveFilter(f.key)}
+                  className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all border ${
+                    isActive
+                      ? "bg-amber-400 text-zinc-900 border-amber-400"
+                      : "bg-white/10 text-zinc-300 border-white/10 hover:bg-white/20"
+                  }`}
+                >
+                  {f.label}
+                  {count > 0 && (
+                    <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                      isActive ? "bg-zinc-900/20" : "bg-white/20"
+                    }`}>{count}</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* Content */}
+      <div className="container max-w-2xl py-6 px-4">
+
+        {/* Loading */}
+        {isLoading && (
+          <div className="flex flex-col items-center justify-center py-20 gap-4">
+            <div className="relative w-12 h-12">
+              <Loader2 className="w-12 h-12 text-zinc-300 animate-spin" />
+              <Scissors className="w-5 h-5 text-zinc-500 absolute inset-0 m-auto" />
+            </div>
+            <p className="text-sm text-zinc-400">Đang tải lịch hẹn...</p>
+          </div>
+        )}
+
+        {/* Error */}
+        {!isLoading && error && (
+          <div className="flex flex-col items-center justify-center py-20 gap-4">
+            <div className="w-14 h-14 rounded-2xl bg-rose-100 flex items-center justify-center">
+              <AlertTriangle className="h-7 w-7 text-rose-500" />
+            </div>
+            <div className="text-center">
+              <p className="text-sm font-medium text-zinc-700">{error}</p>
+              <p className="text-xs text-zinc-400 mt-1">Kiểm tra kết nối và thử lại</p>
+            </div>
+            <button
+              onClick={loadAppointments}
+              className="flex items-center gap-2 px-4 py-2 bg-zinc-900 text-white rounded-xl text-sm font-medium hover:bg-zinc-800 transition-colors"
+            >
+              <RefreshCw className="h-4 w-4" />
+              Thử lại
+            </button>
+          </div>
+        )}
+
+        {/* Empty */}
+        {!isLoading && !error && filtered.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-20 gap-4">
+            <div className="w-16 h-16 rounded-3xl bg-zinc-100 flex items-center justify-center">
+              <CalendarDays className="h-8 w-8 text-zinc-300" />
+            </div>
+            <div className="text-center">
+              <p className="text-sm font-medium text-zinc-600">
+                {activeFilter === "all" ? "Bạn chưa có lịch hẹn nào" : "Không có lịch hẹn nào"}
+              </p>
+              <p className="text-xs text-zinc-400 mt-1">
+                {activeFilter === "all"
+                  ? "Đặt lịch ngay để trải nghiệm dịch vụ"
+                  : `Không có lịch hẹn với trạng thái "${FILTERS.find(f => f.key === activeFilter)?.label}"`}
+              </p>
+            </div>
+            {activeFilter === "all" && (
+              <button
+                onClick={() => router.push("/booking")}
+                className="flex items-center gap-2 px-5 py-2.5 bg-zinc-900 text-white rounded-xl text-sm font-semibold hover:bg-zinc-800 transition-colors"
+              >
+                <Scissors className="h-4 w-4" />
+                Đặt lịch ngay
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* List */}
+        {!isLoading && !error && filtered.length > 0 && (
+          <AnimatePresence mode="popLayout">
+            <div className="grid gap-3">
+              {filtered.map((appt) => (
+                <AppointmentCard
+                  key={appt.id}
+                  appt={appt}
+                  onViewDetail={setSelectedAppt}
+                  onCancel={setCancelTarget}
+                />
+              ))}
+            </div>
+          </AnimatePresence>
+        )}
+
+        {/* Book new CTA */}
+        {!isLoading && !error && (
+          <div className="mt-6">
+            <button
+              onClick={() => router.push("/booking")}
+              className="w-full py-3 rounded-2xl border-2 border-dashed border-zinc-200 text-zinc-400 text-sm font-medium hover:border-zinc-300 hover:text-zinc-500 hover:bg-white transition-all flex items-center justify-center gap-2"
+            >
+              <Scissors className="h-4 w-4" />
+              Đặt lịch mới
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Detail Modal */}
+      <AnimatePresence>
+        {selectedAppt && (
+          <DetailModal
+            appt={selectedAppt}
+            onClose={() => setSelectedAppt(null)}
+            onCancel={(a) => { setSelectedAppt(null); setCancelTarget(a); }}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Cancel Confirm */}
+      <AnimatePresence>
+        {cancelTarget && (
+          <CancelDialog
+            appt={cancelTarget}
+            onClose={() => setCancelTarget(null)}
+            onConfirm={handleCancel}
+            loading={cancelling}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -236,7 +236,7 @@ export default function BookingPage() {
   const days = getNext7Days();
   const depositAmount = selectedStyle ? Math.round(selectedStyle.price * 0.3) : 0;
   const qrUrl = paymentCode
-    ? `https://qr.sepay.vn/img?bank=VietinBank&acc=108873909069&template=compact&amount=${depositAmount}&des=${paymentCode}`
+    ? `https://qr.sepay.vn/img?bank=VietinBank&acc=108873909069&template=compact&amount=${depositAmount}&des=SEVQR+${paymentCode}`
     : "";
 
   // ── Done ─────────────────────────────────────────────────────────────────
