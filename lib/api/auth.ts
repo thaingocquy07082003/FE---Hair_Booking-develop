@@ -2,11 +2,11 @@ import axios from "axios";
 import api from "../axios";
 
 export interface RegisterUserData {
-  username: string;
   email: string;
   password: string;
-  phone?: string;
-  address?: string;
+  confirmPassword: string;
+  fullName: string;
+  phone: string;
 }
 
 export interface VerifyOtpData {
@@ -19,18 +19,20 @@ export interface ResendOtpData {
 }
 
 export async function registerUser(data: RegisterUserData) {
-  console.log("======================================================");
-  const response = await api.post("/auth/register", data);
+  const response = await axios.post(
+    "http://localhost:3001/api/v1/auth/register",
+    data
+  );
   return response.data;
 }
 
 export async function verifyOtp(data: VerifyOtpData) {
-  const response = await api.post("/auth/verify-otp", data);
+  const response = await api.post("http://localhost:3001/api/v1/auth/verify-otp", data);
   return response.data;
 }
 
 export async function resendOtp(data: ResendOtpData) {
-  const response = await api.post("/auth/resend-otp", data);
+  const response = await api.post("http://localhost:3001/api/v1/auth/resend-otp", data);
   return response.data;
 }
 

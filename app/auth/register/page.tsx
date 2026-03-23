@@ -20,11 +20,14 @@ import { toast } from "sonner";
 import { registerUser, verifyOtp, resendOtp } from "@/lib/api/auth";
 
 const formSchema = z.object({
-  username: z.string().min(2, "Tên người dùng phải có ít nhất 2 ký tự"),
+  fullName: z.string().min(2, "Tên đầy đủ phải có ít nhất 2 ký tự"),
   email: z.string().email("Email không hợp lệ"),
   password: z.string().min(6, "Mật khẩu phải có ít nhất 6 ký tự"),
-  phone: z.string().optional(),
-  address: z.string().optional(),
+  confirmPassword: z.string().min(6, "Xác nhận mật khẩu phải có ít nhất 6 ký tự"),
+  phone: z.string().min(10, "Số điện thoại không hợp lệ"),
+}).refine(data => data.password === data.confirmPassword, {
+  message: "Mật khẩu xác nhận không khớp",
+  path: ["confirmPassword"],
 });
 
 export default function RegisterPage() {
@@ -37,11 +40,11 @@ export default function RegisterPage() {
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      username: "",
+      fullName: "",
       email: "",
       password: "",
+      confirmPassword: "",
       phone: "",
-      address: "",
     },
   });
 
@@ -159,12 +162,12 @@ export default function RegisterPage() {
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
             <FormField
               control={form.control}
-              name="username"
+              name="fullName"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Tên người dùng</FormLabel>
+                  <FormLabel>Tên đầy đủ</FormLabel>
                   <FormControl>
-                    <Input placeholder="Nhập tên người dùng" {...field} />
+                    <Input placeholder="Nhập tên của bạn" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -202,12 +205,16 @@ export default function RegisterPage() {
             />
             <FormField
               control={form.control}
-              name="phone"
+              name="confirmPassword"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Số điện thoại</FormLabel>
+                  <FormLabel>Xác nhận mật khẩu</FormLabel>
                   <FormControl>
-                    <Input placeholder="Nhập số điện thoại" {...field} />
+                    <Input
+                      placeholder="Nhập lại mật khẩu"
+                      type="password"
+                      {...field}
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -215,12 +222,12 @@ export default function RegisterPage() {
             />
             <FormField
               control={form.control}
-              name="address"
+              name="phone"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Địa chỉ</FormLabel>
+                  <FormLabel>Số điện thoại</FormLabel>
                   <FormControl>
-                    <Input placeholder="Nhập địa chỉ" {...field} />
+                    <Input placeholder="Nhập số điện thoại" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
