@@ -86,6 +86,7 @@ export default function BookingPage() {
   const [showQR, setShowQR] = useState(false);
   const [paymentCode, setPaymentCode] = useState("");
   const [checkingPayment, setCheckingPayment] = useState(false);
+  const [showConfirmSkipPayment, setShowConfirmSkipPayment] = useState(false);
 
   const [selectedStyle, setSelectedStyle] = useState<HairStyle | null>(null);
   const [selectedStylist, setSelectedStylist] = useState<Stylist | null>(null);
@@ -646,7 +647,7 @@ export default function BookingPage() {
               </div>
               {/* Buttons */}
               <div className="flex gap-2">
-                <button onClick={() => { setShowQR(false); setDone(true); }}
+                <button onClick={() => setShowConfirmSkipPayment(true)}
                   className="flex-1 py-3 rounded-2xl border border-zinc-200 text-zinc-600 text-sm font-medium hover:bg-zinc-50 transition-colors">
                   Bỏ qua
                 </button>
@@ -656,6 +657,53 @@ export default function BookingPage() {
                   {checkingPayment
                     ? <><Loader2 className="h-4 w-4 animate-spin" /> Đang kiểm tra...</>
                     : <><RefreshCw className="h-4 w-4" /> Đã thanh toán</>}
+                </button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* ✅ Confirm Skip Payment Modal */}
+      <AnimatePresence>
+        {showConfirmSkipPayment && (
+          <>
+            <motion.div key="confirm-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/60 z-50 backdrop-blur-sm" />
+            <motion.div key="confirm-modal"
+              initial={{ opacity: 0, scale: 0.92, y: 24 }} animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.92, y: 24 }} transition={{ type: "spring", damping: 28, stiffness: 300 }}
+              className="fixed inset-x-4 top-1/2 -translate-y-1/2 z-50 bg-white rounded-3xl shadow-2xl p-7 max-w-sm mx-auto">
+              {/* Header */}
+              <div className="text-center mb-5">
+                <div className="w-12 h-12 bg-rose-100 rounded-2xl flex items-center justify-center mx-auto mb-3">
+                  <CheckCircle2 className="h-6 w-6 text-rose-600" />
+                </div>
+                <h2 className="text-lg font-bold text-zinc-900">Cần thanh toán đặt cọc</h2>
+                <p className="text-sm text-zinc-500 mt-2 leading-relaxed">
+                  Để hoàn tất đặt lịch hẹn, bạn cần thanh toán đặt cọc <span className="font-semibold text-amber-600">{formatPrice(depositAmount)}</span> trước.
+                </p>
+              </div>
+              {/* Info */}
+              <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 mb-6">
+                <p className="text-xs text-rose-700">
+                  ⚠️ Nếu bỏ qua, bạn sẽ quay lại bước xác nhận đặt lịch. Lịch hẹn sẽ không được tạo cho đến khi thanh toán thành công.
+                </p>
+              </div>
+              {/* Buttons */}
+              <div className="flex gap-2">
+                <button onClick={() => setShowConfirmSkipPayment(false)}
+                  className="flex-1 py-3 rounded-2xl border border-zinc-200 text-zinc-600 text-sm font-medium hover:bg-zinc-50 transition-colors">
+                  Quay lại thanh toán
+                </button>
+                <button onClick={() => {
+                  setShowQR(false);
+                  setShowConfirmSkipPayment(false);
+                  setStep(4);
+                  toast.info("Quay lại bước xác nhận. Bạn cần thanh toán để hoàn tất đặt lịch.");
+                }}
+                  className="flex-1 py-3 rounded-2xl bg-rose-500 text-white text-sm font-medium hover:bg-rose-600 transition-colors">
+                  Thoát
                 </button>
               </div>
             </motion.div>

@@ -1,17 +1,19 @@
+"use client";
+
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
   ArrowRight,
-  BadgePercent,
   CheckCircle2,
   Clock3,
-  Crown,
-  Droplets,
-  MapPin,
   Scissors,
   Sparkles,
   Star,
+  Droplets,
+  Crown,
   WandSparkles,
+  Loader2,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -23,105 +25,36 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/utils";
+import { getServiceList } from "@/services/service/get-service-list.api";
 
-type ServiceItem = {
+type Service = {
   id: string;
   name: string;
   description: string;
   duration: number;
   price: number;
-  icon: LucideIcon;
-  highlight: string;
-  includes: string[];
+  category: string | null;
+  imageUrl: string | null;
+  isAvailable: boolean;
+  createdAt: string;
+  updatedAt: string;
 };
 
-const serviceList: ServiceItem[] = [
-  {
-    id: "cut-basic",
-    name: "Cắt tóc cơ bản",
-    description:
-      "Tư vấn nhanh, cắt gọn gàng theo khuôn mặt, làm sạch viền và hoàn thiện kiểu tóc tự nhiên.",
-    duration: 30,
-    price: 120000,
-    icon: Scissors,
-    highlight: "Phù hợp đi làm mỗi ngày",
-    includes: ["Tư vấn kiểu tóc", "Cắt tạo form", "Sấy hoàn thiện"],
-  },
-  {
-    id: "cut-styling",
-    name: "Cắt + tạo kiểu",
-    description:
-      "Dành cho khách muốn chỉn chu hơn với phần tạo phồng, vuốt texture hoặc dựng form hiện đại.",
-    duration: 45,
-    price: 180000,
-    icon: Sparkles,
-    highlight: "Kiểu tóc lên form đẹp",
-    includes: ["Cắt theo mặt", "Tạo kiểu bằng sáp", "Hướng dẫn tự styling"],
-  },
-  {
-    id: "beard-trim",
-    name: "Tỉa râu & chân tóc",
-    description:
-      "Làm sạch đường viền râu, chỉnh chân tóc và cân đối tổng thể khuôn mặt để gọn gàng hơn.",
-    duration: 20,
-    price: 90000,
-    icon: Crown,
-    highlight: "Gọn mặt, sáng nét hơn",
-    includes: ["Tỉa râu", "Tạo viền cổ", "Xử lý tóc mai"],
-  },
-  {
-    id: "wash-head-massage",
-    name: "Gội đầu & massage",
-    description:
-      "Dịch vụ đi kèm giúp thư giãn da đầu, làm sạch tóc và mang lại cảm giác thoải mái sau khi cắt.",
-    duration: 25,
-    price: 80000,
-    icon: Droplets,
-    highlight: "Thư giãn sau giờ làm",
-    includes: ["Gội sạch da đầu", "Massage vai gáy", "Sấy nhẹ tóc"],
-  },
-  {
-    id: "color-refresh",
-    name: "Nhuộm phủ bạc",
-    description:
-      "Giải pháp tinh gọn cho khách muốn che tóc bạc, giữ vẻ ngoài trẻ trung và màu tóc tự nhiên.",
-    duration: 60,
-    price: 350000,
-    icon: WandSparkles,
-    highlight: "Lên màu tự nhiên",
-    includes: ["Tư vấn màu", "Nhuộm phủ bạc", "Chăm sóc sau nhuộm"],
-  },
-];
-
-const addOnServices = [
-  "Cạo mặt & làm sạch viền tóc",
-  "Hot towel thư giãn",
-  "Vuốt sáp tạo kiểu",
-  "Tư vấn kiểu tóc theo khuôn mặt",
-  "Chăm sóc da đầu cơ bản",
-  "Chụp ảnh kiểu tóc sau hoàn thiện",
-];
-
-const comboPackages = [
-  {
-    name: "Combo đi làm",
-    price: 220000,
-    duration: 50,
-    note: "Cắt cơ bản + gội đầu + vuốt sáp",
-  },
-  {
-    name: "Combo chỉnh chu",
-    price: 280000,
-    duration: 70,
-    note: "Cắt tạo kiểu + tỉa râu + massage vai gáy",
-  },
-  {
-    name: "Combo premium",
-    price: 420000,
-    duration: 90,
-    note: "Cắt + tạo kiểu + chăm sóc da đầu + hot towel",
-  },
-];
+// Map category to icon
+const getCategoryIcon = (category: string | null): LucideIcon => {
+  switch (category?.toLowerCase()) {
+    case "cắt tóc":
+      return Scissors;
+    case "nhuộm":
+      return WandSparkles;
+    case "uốn/duỗi":
+      return Sparkles;
+    case "chăm sóc":
+      return Droplets;
+    default:
+      return Crown;
+  }
+};
 
 const serviceHighlights = [
   {
@@ -139,6 +72,30 @@ const serviceHighlights = [
 ];
 
 export default function ServicesPage() {
+  const [services, setServices] = useState<Service[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchServices = async () => {
+      try {
+        setLoading(true);
+        const response = await getServiceList();
+        if (response.data) {
+          setServices(response.data);
+        }
+        setError(null);
+      } catch (err) {
+        console.error("Failed to fetch services:", err);
+        setError("Không thể tải danh sách dịch vụ. Vui lòng thử lại.");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchServices();
+  }, []);
+
   return (
     <div className="min-h-screen bg-[#f7f3ed]">
       <section className="relative overflow-hidden bg-zinc-950 px-4 py-20 text-white sm:px-6 lg:px-8">
@@ -163,9 +120,8 @@ export default function ServicesPage() {
               Cắt tóc chuẩn form, kèm dịch vụ chăm sóc đầy đủ
             </h1>
             <p className="mx-auto mt-5 max-w-2xl text-base leading-7 text-zinc-300 sm:text-lg">
-              Đây là bản mock cho trang dịch vụ: tập trung vào các gói cắt tóc,
-              tạo kiểu, tỉa râu, gội đầu và chăm sóc da đầu để khách dễ chọn
-              ngay từ đầu.
+              Chúng tôi cung cấp đầy đủ các dịch vụ chăm sóc tóc chuyên nghiệp từ
+              cắt tóc, nhuộm, đến chăm sóc da đầu.
             </p>
 
             <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
@@ -213,92 +169,109 @@ export default function ServicesPage() {
               className="mt-2 text-3xl font-bold text-zinc-950 sm:text-4xl"
               style={{ fontFamily: "Arial, sans-serif" }}
             >
-              Một số dịch vụ đi kèm
+              Danh sách dịch vụ
             </h2>
           </div>
         </div>
 
-        <div className="mt-8 grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
-          {serviceList.map((service, index) => {
-            const Icon = service.icon;
+        {loading && (
+          <div className="mt-8 flex justify-center">
+            <div className="flex flex-col items-center gap-3">
+              <Loader2 className="h-8 w-8 animate-spin text-zinc-400" />
+              <p className="text-zinc-600">Đang tải danh sách dịch vụ...</p>
+            </div>
+          </div>
+        )}
 
-            return (
-              <Card
-                key={service.id}
-                className="group overflow-hidden border-zinc-200/80 bg-white transition-all duration-300 hover:-translate-y-1 hover:shadow-xl"
-              >
-                <CardHeader className="space-y-4 border-b border-zinc-100 pb-5">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-950 text-white shadow-lg shadow-zinc-950/10">
-                        <Icon className="h-5 w-5" />
+        {error && (
+          <div className="mt-8 rounded-lg border border-red-200 bg-red-50 p-4">
+            <p className="text-red-700">{error}</p>
+          </div>
+        )}
+
+        {!loading && !error && services.length === 0 && (
+          <div className="mt-8 text-center">
+            <p className="text-zinc-600">Không có dịch vụ nào.</p>
+          </div>
+        )}
+
+        {!loading && !error && services.length > 0 && (
+          <div className="mt-8 grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+            {services.map((service, index) => {
+              const Icon = getCategoryIcon(service.category);
+
+              return (
+                <Card
+                  key={service.id}
+                  className="group overflow-hidden border-zinc-200/80 bg-white transition-all duration-300 hover:-translate-y-1 hover:shadow-xl"
+                >
+                  <CardHeader className="space-y-4 border-b border-zinc-100 pb-5">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-950 text-white shadow-lg shadow-zinc-950/10">
+                          <Icon className="h-5 w-5" />
+                        </div>
+                        <div>
+                          <CardTitle className="text-lg text-zinc-950">
+                            {service.name}
+                          </CardTitle>
+                          <CardDescription className="mt-1 flex items-center gap-2 text-sm">
+                            <Clock3 className="h-3.5 w-3.5" />
+                            {service.duration} phút
+                          </CardDescription>
+                        </div>
                       </div>
-                      <div>
-                        <CardTitle className="text-lg text-zinc-950">
-                          {service.name}
-                        </CardTitle>
-                        <CardDescription className="mt-1 flex items-center gap-2 text-sm">
-                          <Clock3 className="h-3.5 w-3.5" />
-                          {service.duration} phút
-                        </CardDescription>
+                      <div className="flex flex-col items-end gap-2">
+                        {service.category && (
+                          <div className="rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700">
+                            {service.category}
+                          </div>
+                        )}
+                        {service.isAvailable ? (
+                          <div className="rounded-full bg-green-50 px-2 py-1 text-xs font-semibold text-green-700">
+                            Có sẵn
+                          </div>
+                        ) : (
+                          <div className="rounded-full bg-gray-100 px-2 py-1 text-xs font-semibold text-gray-600">
+                            Hết
+                          </div>
+                        )}
                       </div>
                     </div>
-                    <div className="rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700">
-                      Gói {index + 1}
-                    </div>
-                  </div>
+                  </CardHeader>
 
-                  <div className="inline-flex w-fit items-center gap-2 rounded-full bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-600">
-                    <Star className="h-3.5 w-3.5 text-amber-500" />
-                    {service.highlight}
-                  </div>
-                </CardHeader>
-
-                <CardContent className="space-y-4 py-5">
-                  <p className="text-sm leading-6 text-zinc-600">
-                    {service.description}
-                  </p>
-
-                  <div>
-                    <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-400">
-                      Bao gồm
+                  <CardContent className="space-y-4 py-5">
+                    <p className="text-sm leading-6 text-zinc-600">
+                      {service.description}
                     </p>
-                    <ul className="space-y-2">
-                      {service.includes.map((item) => (
-                        <li key={item} className="flex items-start gap-2 text-sm text-zinc-700">
-                          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" />
-                          <span>{item}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
 
-                  <div className="flex items-center justify-between rounded-2xl bg-zinc-50 px-4 py-3">
-                    <div>
-                      <p className="text-xs uppercase tracking-[0.2em] text-zinc-400">
-                        Giá từ
-                      </p>
-                      <p className="mt-1 text-xl font-bold text-zinc-950">
-                        {formatCurrency(service.price)}đ
-                      </p>
+                    <div className="flex items-center justify-between rounded-2xl bg-zinc-50 px-4 py-3">
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.2em] text-zinc-400">
+                          Giá từ
+                        </p>
+                        <p className="mt-1 text-xl font-bold text-zinc-950">
+                          {formatCurrency(service.price)}đ
+                        </p>
+                      </div>
+                      <div className="flex h-11 w-11 items-center justify-center rounded-full bg-zinc-950 text-white">
+                        <ArrowRight className="h-4 w-4" />
+                      </div>
                     </div>
-                    <div className="flex h-11 w-11 items-center justify-center rounded-full bg-zinc-950 text-white">
-                      <ArrowRight className="h-4 w-4" />
-                    </div>
-                  </div>
-                </CardContent>
+                  </CardContent>
 
-                <div className="px-6 pb-6">
-                  <Button asChild className="w-full bg-zinc-950 text-white hover:bg-zinc-800">
-                    <Link href={`/booking?service=${service.id}&step=info`}>
-                      Cắt tóc ngay
-                    </Link>
-                  </Button>
-                </div>
-              </Card>
-            );
-          })}
-        </div>
+                  <div className="px-6 pb-6">
+                    <Button asChild className="w-full bg-zinc-950 text-white hover:bg-zinc-800" disabled={!service.isAvailable}>
+                      <Link href={`/booking?service=${service.id}&step=info`}>
+                        Đặt lịch ngay
+                      </Link>
+                    </Button>
+                  </div>
+                </Card>
+              );
+            })}
+          </div>
+        )}
       </section>
     </div>
   );
